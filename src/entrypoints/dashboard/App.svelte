@@ -64,7 +64,10 @@
         </button>
       {/each}
     </div>
-    <p class="foot muted">Local only · no servers</p>
+    <div class="foot muted">
+      <p>Like Ghosted? <a href="https://x.com/stackway24" target="_blank" rel="noopener">Follow Gab on X</a></p>
+      <p>Local only · no servers</p>
+    </div>
   </nav>
   <main>
     {#if !$owner}
@@ -103,7 +106,8 @@
   .links button { display: flex; align-items: center; gap: 10px; text-align: left; border-color: transparent; background: transparent; color: var(--muted); padding: 8px 10px; }
   .links button:hover { color: var(--text); background: #ffffff0d; }
   .links button.active { background: #e0a33a1f; color: var(--amber); font-weight: 650; }
-  .foot { margin-top: auto; font-size: 12px; padding: 0 6px; }
+  .foot { margin-top: auto; font-size: 12px; padding: 0 6px; display: grid; gap: 4px; }
+  .foot p { margin: 0; }
   main { padding: 28px 36px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; min-width: 0; max-width: 1200px; }
   .onboard { display: grid; gap: 10px; justify-items: start; padding: 28px; }
   @media (max-width: 760px) {
