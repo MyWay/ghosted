@@ -1,6 +1,6 @@
 {
   "name": "ghosted",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -15,7 +15,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "zip:firefox": "wxt zip -b firefox --mv3",
-    "release": "pnpm test && pnpm check && pnpm zip && pnpm zip:firefox"
+    "release": "rm -f .output/*.zip && pnpm test && pnpm check && pnpm zip && pnpm zip:firefox"
   },
   "dependencies": {
     "dexie": "^4.0.0",
