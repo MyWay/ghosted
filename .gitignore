@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output (unpacked builds, store zips) and WXT's generated files
+.output/
+.wxt/
+web-ext-artifacts/
+*.zip
+*.xpi
+*.crx
+
+# Signing keys and secrets: never commit these
+*.pem
+.env
+.env.*
+!.env.example
+.amo-upload-uuid
+
+# Test / tooling caches
+coverage/
+.vitest/
+.eslintcache
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

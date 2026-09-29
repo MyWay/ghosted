@@ -1,0 +1,76 @@
+# Runs on a pushed version tag (`pnpm version patch && git push --follow-tags`).
+# Builds, signs the Firefox add-on as unlisted on AMO, and publishes a GitHub Release.
+# Needs secrets AMO_JWT_ISSUER and AMO_JWT_SECRET (AMO > Developer Hub > API keys) stored in the
+# "release" environment. Without them the release is created as a draft with no .xpi.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Check tag matches package.json version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm release
+
+      - name: Collect release files
+        run: |
+          mkdir dist
+          cp ".output/ghosted-$VERSION-chrome.zip" dist/ghosted-chrome.zip
+          cp ".output/ghosted-$VERSION-sources.zip" dist/ghosted-sources.zip
+
+      - name: Sign Firefox add-on (unlisted)
+        id: sign
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          if [ -z "$WEB_EXT_API_KEY" ] || [ -z "$WEB_EXT_API_SECRET" ]; then
+            echo "::warning::AMO secrets not set; skipping Firefox signing and creating a draft release."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pnpm dlx web-ext@10.7.0 sign \
+            --channel unlisted \
+            --source-dir .output/firefox-mv3 \
+            --upload-source-code dist/ghosted-sources.zip \
+            --artifacts-dir web-ext-artifacts
+          cp web-ext-artifacts/*.xpi dist/ghosted-firefox.xpi
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          draft=""
+          if [ "${{ steps.sign.outputs.signed }}" != "true" ]; then draft="--draft"; fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Ghosted $VERSION" \
+            --generate-notes \
+            $draft

@@ -1,0 +1,33 @@
+{
+  "name": "ghosted",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox --mv3",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox --mv3",
+    "zip": "wxt zip",
+    "postinstall": "wxt prepare",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "zip:firefox": "wxt zip -b firefox --mv3",
+    "release": "pnpm test && pnpm check && pnpm zip && pnpm zip:firefox"
+  },
+  "dependencies": {
+    "dexie": "^4.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@wxt-dev/module-svelte": "^2.0.0",
+    "fake-indexeddb": "^6.0.0",
+    "svelte": "^5.0.0",
+    "svelte-check": "^4.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0",
+    "wxt": "^0.20.0"
+  }
+}
