@@ -65,7 +65,7 @@
       {/each}
     </div>
     <div class="foot muted">
-      <p>Like Ghosted? <a href="https://x.com/stackway24" target="_blank" rel="noopener">Follow Gab on X</a></p>
+      <p>Found Ghosted useful? <a href="https://x.com/stackway24" target="_blank" rel="noopener">Follow Gab on X</a></p>
       <p>Local only · no servers</p>
     </div>
   </nav>
