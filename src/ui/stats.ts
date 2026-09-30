@@ -56,6 +56,38 @@ const startOfDay = (ts: number) => {
 };
 
 /** Followers gained / lost per local day, for the last `days` days including today. */
+/** The same departure can be reported by both lists (following scan: LOST_MUTUAL, followers scan: LOST_FOLLOWER). */
+const DUPLICATE_WINDOW_MS = 3 * 86_400_000;
+
+export interface FollowerChange {
+  at: number;
+  kind: 'gain' | 'loss';
+  userId: string;
+}
+
+/**
+ * Follower gains and losses, with duplicates removed. "Followed you back" (NEW_MUTUAL) is a gain and
+ * "stopped following you back" (LOST_MUTUAL) is a loss, because someone you follow who stops or starts
+ * following you changes your follower count too. The follower scan later reports the same person again,
+ * so a second event of the same kind for the same user within 3 days is ignored.
+ */
+export function followerChanges(events: EventRow[]): FollowerChange[] {
+  const kindOf = (t: EventRow['type']) =>
+    t === 'NEW_FOLLOWER' || t === 'NEW_MUTUAL' ? 'gain' : t === 'LOST_FOLLOWER' || t === 'LOST_MUTUAL' ? 'loss' : null;
+  const last = new Map<string, number>();
+  const out: FollowerChange[] = [];
+  for (const e of [...events].sort((a, b) => a.at - b.at)) {
+    const kind = kindOf(e.type);
+    if (!kind) continue;
+    const key = `${kind}:${e.userId}`;
+    const prev = last.get(key);
+    if (prev !== undefined && e.at - prev < DUPLICATE_WINDOW_MS) continue;
+    last.set(key, e.at);
+    out.push({ at: e.at, kind, userId: e.userId });
+  }
+  return out;
+}
+
 export function dailyChanges(events: EventRow[], days: number, now: number): DayChange[] {
   const today = startOfDay(now);
   const out: DayChange[] = [];
@@ -65,11 +97,11 @@ export function dailyChanges(events: EventRow[], days: number, now: number): Day
     out.push({ day: d.getTime(), gained: 0, lost: 0 });
   }
   const index = new Map(out.map((d, i) => [d.day, i]));
-  for (const e of events) {
-    const i = index.get(startOfDay(e.at));
+  for (const c of followerChanges(events)) {
+    const i = index.get(startOfDay(c.at));
     if (i === undefined) continue;
-    if (e.type === 'NEW_FOLLOWER') out[i].gained++;
-    else if (e.type === 'LOST_FOLLOWER') out[i].lost++;
+    if (c.kind === 'gain') out[i].gained++;
+    else out[i].lost++;
   }
   return out;
 }

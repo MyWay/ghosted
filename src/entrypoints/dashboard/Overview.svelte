@@ -75,7 +75,7 @@
   <section class="tiles">
     <StatTile hero label="Followers" value={v.hasFollowers ? v.t.followers : undefined} delta={v.followersDelta} />
     <div class="small-tiles">
-      <StatTile label="Following" value={v.hasFollowing ? v.t.following : undefined} delta={v.followingDelta} upIsGood={false} />
+      <StatTile label="Following" value={v.hasFollowing ? v.t.following : undefined} delta={v.followingDelta} />
       <StatTile label="Mutuals" value={v.hasFollowing ? v.t.mutuals : undefined} onclick={() => go('mutuals')} />
       <StatTile label="Not following back" value={v.hasFollowing ? v.t.notFollowingBack : undefined} onclick={() => go('not-following-back')} />
       <StatTile label="Fans" value={v.hasFollowers && v.hasFollowing ? v.t.fans : undefined} onclick={() => go('fans')} />

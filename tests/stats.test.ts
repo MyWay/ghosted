@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countSeries, dailyChanges, delta, niceTicks, signed, totals } from '../src/ui/stats';
+import { countSeries, dailyChanges, delta, followerChanges, niceTicks, signed, totals } from '../src/ui/stats';
 import type { EventRow, ScanRow } from '../src/db/schema';
 
 const DAY = 86_400_000;
@@ -36,7 +36,8 @@ describe('countSeries / delta', () => {
 describe('dailyChanges', () => {
   it('buckets follower gains and losses by local day', () => {
     const now = new Date(2026, 8, 29, 15).getTime();
-    const ev = (daysAgo: number, type: EventRow['type']) => ({ at: now - daysAgo * DAY, type }) as EventRow;
+    let uid = 0;
+    const ev = (daysAgo: number, type: EventRow['type']) => ({ at: now - daysAgo * DAY, type, userId: String(++uid) }) as EventRow;
     const days = dailyChanges([ev(0, 'NEW_FOLLOWER'), ev(0, 'LOST_FOLLOWER'), ev(1, 'LOST_FOLLOWER'), ev(1, 'RENAME'), ev(40, 'LOST_FOLLOWER')], 7, now);
     expect(days).toHaveLength(7);
     expect(days[6]).toMatchObject({ gained: 1, lost: 1 });
@@ -65,5 +66,32 @@ describe('niceTicks integer mode', () => {
     for (const [lo, hi] of [[-3, 6], [-1, 1], [0, 3], [-5, 10]]) {
       expect(niceTicks(lo, hi, 4, true).every(Number.isInteger)).toBe(true);
     }
+  });
+});
+
+describe('followerChanges: mutual events count as follower changes, once', () => {
+  const H = 3_600_000;
+  const ev = (type: EventRow['type'], userId: string, at: number) => ({ type, userId, at }) as EventRow;
+  const kinds = (events: EventRow[]) => followerChanges(events).map((c) => `${c.kind}:${c.userId}`);
+
+  it('counts "stopped following you back" as a lost follower and "followed you back" as a gain', () => {
+    expect(kinds([ev('LOST_MUTUAL', '1', 10 * H), ev('NEW_MUTUAL', '2', 11 * H)])).toEqual(['loss:1', 'gain:2']);
+  });
+  it('does not count the follower scan again for the same departure', () => {
+    expect(kinds([ev('LOST_MUTUAL', '1', 10 * H), ev('LOST_FOLLOWER', '1', 30 * H)])).toEqual(['loss:1']);
+    expect(kinds([ev('LOST_FOLLOWER', '1', 10 * H), ev('LOST_MUTUAL', '1', 30 * H)])).toEqual(['loss:1']);
+    expect(kinds([ev('NEW_MUTUAL', '1', 10 * H), ev('NEW_FOLLOWER', '1', 30 * H)])).toEqual(['gain:1']);
+  });
+  it('keeps the earliest day for the counted departure', () => {
+    const now = new Date(2026, 8, 29, 15).getTime();
+    const days = dailyChanges([ev('LOST_MUTUAL', '1', now - 1 * 86_400_000), ev('LOST_FOLLOWER', '1', now)], 3, now);
+    expect(days.map((d) => d.lost)).toEqual([0, 1, 0]);
+  });
+  it('counts different users, and the same user again after 3 days, separately', () => {
+    expect(kinds([ev('LOST_MUTUAL', '1', 0), ev('LOST_MUTUAL', '2', H)])).toEqual(['loss:1', 'loss:2']);
+    expect(kinds([ev('LOST_FOLLOWER', '1', 0), ev('LOST_FOLLOWER', '1', 10 * 24 * H)])).toEqual(['loss:1', 'loss:1']);
+  });
+  it('ignores events that are not follower changes', () => {
+    expect(kinds([ev('NEW_FOLLOWING', '1', 0), ev('UNFOLLOWED_BY_ME', '2', 0), ev('RENAME', '3', 0)])).toEqual([]);
   });
 });
