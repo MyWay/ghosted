@@ -4,6 +4,7 @@
   import { repo } from '../../ui/repo';
   import { hasXAccess, requestXAccess } from '../../ui/access';
   import Icon from '../../ui/Icon.svelte';
+  import { FOLLOW_HANDLE, FOLLOW_URL, followPromptDone, markFollowPromptDone } from '../../ui/follow';
 
   let access = $state<boolean | null>(null);
   let scanError = $state('');
@@ -116,6 +117,17 @@
     </ul>
   </section>
 
+  {#if step === 4 && $followPromptDone === false}
+    <section class="card follow">
+      <h3>One last thing <span class="muted">(optional)</span></h3>
+      <p class="muted">X changes its website a few times a year, and Ghosted may need a quick fix when it does. Follow @{FOLLOW_HANDLE} to hear about updates.</p>
+      <div class="row">
+        <a class="btn" href={FOLLOW_URL} target="_blank" rel="noopener" onclick={markFollowPromptDone}>Follow @{FOLLOW_HANDLE}</a>
+        <button class="link" onclick={markFollowPromptDone}>No thanks</button>
+      </div>
+    </section>
+  {/if}
+
   <button class="primary big" disabled={step < 4} onclick={openDashboard}>{step < 4 ? 'Finish the steps above' : 'Open your dashboard →'}</button>
 </main>
 
@@ -136,4 +148,10 @@
   p { margin: 6px 0 10px; line-height: 1.45; }
   .tips ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.7; }
   .big { justify-self: start; padding: 12px 22px; font-size: 15px; }
+  .follow { display: grid; gap: 8px; }
+  .follow p { margin: 0; }
+  .follow .btn { display: inline-block; padding: 6px 12px; border: 1px solid var(--line); border-radius: 7px; background: #ffffff10; color: var(--text); font-weight: 600; }
+  .follow .btn:hover { background: #ffffff1c; text-decoration: none; }
+  .link { background: none; border: 0; color: var(--muted); padding: 6px 8px; }
+  .link:hover:not(:disabled) { background: none; color: var(--text); }
 </style>

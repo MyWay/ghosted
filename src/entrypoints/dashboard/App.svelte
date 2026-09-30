@@ -4,6 +4,7 @@
   import type { ComponentProps } from 'svelte';
   import { repo } from '../../ui/repo';
   import Icon from '../../ui/Icon.svelte';
+  import { FOLLOW_URL, followPromptDone, markFollowPromptDone } from '../../ui/follow';
   import Overview from './Overview.svelte';
   import Timeline from './Timeline.svelte';
   import Lists from './Lists.svelte';
@@ -65,7 +66,12 @@
       {/each}
     </div>
     <div class="foot muted">
-      <p>Found Ghosted useful? <a href="https://x.com/stackway24" target="_blank" rel="noopener">Follow Gab on X</a></p>
+      {#if $owner?.ownerId && $followPromptDone === false}
+        <div class="follow">
+          <p>Found Ghosted useful? <a href={FOLLOW_URL} target="_blank" rel="noopener" onclick={markFollowPromptDone}>Follow @stackway24 for updates</a></p>
+          <button class="x" aria-label="Dismiss" title="Dismiss" onclick={markFollowPromptDone}>×</button>
+        </div>
+      {/if}
       <p>Local only · no servers</p>
     </div>
   </nav>
@@ -108,6 +114,9 @@
   .links button.active { background: #e0a33a1f; color: var(--amber); font-weight: 650; }
   .foot { margin-top: auto; font-size: 12px; padding: 0 6px; display: grid; gap: 4px; }
   .foot p { margin: 0; }
+  .follow { display: flex; align-items: flex-start; gap: 6px; }
+  .follow .x { background: none; border: 0; color: var(--muted); font-size: 18px; line-height: 1; padding: 0 4px; margin-top: -2px; }
+  .follow .x:hover { color: var(--text); background: none; }
   main { padding: 28px 36px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; min-width: 0; max-width: 1200px; }
   .onboard { display: grid; gap: 10px; justify-items: start; padding: 28px; }
   @media (max-width: 760px) {
