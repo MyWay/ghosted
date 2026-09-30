@@ -35,7 +35,12 @@ export interface PageInput {
 
 /** Session idle timeout before it is abandoned. */
 export const SESSION_IDLE_MS = 10 * 60 * 1000;
-export const DEFAULT_THRESHOLD = 0.98;
+/**
+ * Minimum share of X's follower/following counter that a scan must collect. X's list is usually a
+ * little shorter than the counter (suspended / unlisted accounts), so this is deliberately loose:
+ * truncation is already caught by the cursor-chain checks and by the mass-removal review guard.
+ */
+export const DEFAULT_THRESHOLD = 0.9;
 
 const isTerminalCursor = (c: string | undefined) => !c || c.startsWith('0|');
 const add = (list: string[], v: string | undefined) => (v && !list.includes(v) ? [...list, v] : list);

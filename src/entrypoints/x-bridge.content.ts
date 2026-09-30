@@ -3,6 +3,7 @@ import { handleFromProfileHref } from '../core/owner';
 import type { ListKind } from '../core/types';
 import { CHANNEL, type BridgeReadyReply, type CaptureReply, type PageCapture, type ToBackground } from '../messages';
 import { AutoScroller } from '../bridge/autoscroll';
+import { PACES, asPace, type Pace } from '../core/pace';
 import { Overlay } from '../bridge/overlay';
 
 async function send<T>(msg: ToBackground): Promise<T | undefined> {
@@ -46,7 +47,7 @@ export default defineContentScript({
       else if (attempt < 30) setTimeout(() => reportHandle(attempt + 1), 1000);
     };
 
-    const start = async (kind: ListKind) => {
+    const start = async (kind: ListKind, pace: Pace) => {
       overlay = new Overlay();
       scroller = new AutoScroller(kind, {
         onProgress: (p) => overlay?.update(kind, p),
@@ -55,7 +56,7 @@ export default defineContentScript({
           scroller = null;
           void send({ type: 'scan-finished', kind, outcome });
         },
-      });
+      }, PACES[pace]);
       overlay.onPause = (paused) => scroller?.setPaused(paused);
       overlay.onStop = () => scroller?.stop();
       scroller.start(lastReply);
@@ -64,7 +65,7 @@ export default defineContentScript({
     const init = async () => {
       reportHandle();
       const reply = await send<BridgeReadyReply>({ type: 'bridge-ready', path: location.pathname });
-      if (reply?.autoscroll) void start(reply.autoscroll);
+      if (reply?.autoscroll) void start(reply.autoscroll, asPace(reply.pace));
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void init());
     else void init();

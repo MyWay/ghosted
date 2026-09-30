@@ -42,6 +42,23 @@ export function delta(series: Point[], windowMs: number, now: number): number | 
   return before === last ? undefined : last.v - before.v;
 }
 
+export interface ListGap {
+  /** The follower/following count X itself showed when the scan ran. */
+  xCount: number;
+  /** How many accounts X counts beyond the ones it listed. */
+  gap: number;
+}
+
+/**
+ * X's counter is usually a little higher than the list it serves (suspended / deactivated accounts).
+ * Returns the difference for the latest committed scan, or null when unknown or too small to mention.
+ */
+export function listGap(scan: Pick<ScanRow, 'collected' | 'expected'> | undefined, minGap = 3): ListGap | null {
+  if (!scan?.expected) return null;
+  const gap = scan.expected - scan.collected;
+  return gap >= minGap ? { xCount: scan.expected, gap } : null;
+}
+
 export interface DayChange {
   /** Local midnight of the day. */
   day: number;

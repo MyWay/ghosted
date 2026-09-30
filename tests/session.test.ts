@@ -51,10 +51,14 @@ describe('session', () => {
     expect(evaluate(s, 5)).toMatchObject({ status: 'invalid' });
   });
   it('is invalid below the count threshold, counting unavailable accounts as seen', () => {
-    const low = run([{ page: page(90), total: 90 }]);
+    const low = run([{ page: page(85), total: 85 }]);
     expect(evaluate(low, 100).status).toBe('invalid');
-    const withGone = run([{ page: page(90, undefined, { unavailable: 8 }), total: 90 }]);
+    const withGone = run([{ page: page(85, undefined, { unavailable: 8 }), total: 85 }]);
     expect(evaluate(withGone, 100).status).toBe('complete');
+  });
+  it('tolerates the usual gap between X\'s counter and its list (up to 10%)', () => {
+    expect(evaluate(run([{ page: page(93), total: 93 }]), 100).status).toBe('complete');
+    expect(evaluate(run([{ page: page(686), total: 686 }]), 698).status).toBe('complete');
   });
   it('completes with expectedKnown=false when no count is known', () => {
     expect(evaluate(run([{ page: page(5), total: 5 }]), undefined)).toEqual({ status: 'complete', expectedKnown: false });

@@ -9,6 +9,8 @@
     deltaLabel = 'vs 7 days ago',
     upIsGood = true,
     hero = false,
+    note,
+    noteTitle,
     onclick,
   }: {
     label: string;
@@ -17,6 +19,9 @@
     deltaLabel?: string;
     upIsGood?: boolean;
     hero?: boolean;
+    /** Optional one-line hint under the value; `noteTitle` is the longer explanation on hover. */
+    note?: string;
+    noteTitle?: string;
     onclick?: () => void;
   } = $props();
 
@@ -32,6 +37,9 @@
       {signed(delta)} <span class="muted">{deltaLabel}</span>
     </div>
   {/if}
+  {#if note}
+    <div class="note muted" title={noteTitle} aria-label={noteTitle ? `${note}. ${noteTitle}` : note}>{note} <Icon name="info" size={13} /></div>
+  {/if}
 </svelte:element>
 
 <style>
@@ -39,5 +47,6 @@
   .clickable { cursor: pointer; font: inherit; color: inherit; }
   .clickable:hover { border-color: #e0a33a66; background: var(--surface); }
   .hero-value { font-size: 52px; letter-spacing: -0.02em; }
+  .note { display: flex; align-items: center; gap: 4px; font-size: 12px; margin-top: 2px; cursor: help; }
   .delta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; margin-top: 4px; }
 </style>

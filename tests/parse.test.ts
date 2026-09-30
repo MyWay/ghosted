@@ -103,3 +103,33 @@ describe('parseUnfollow', () => {
     expect(parseUnfollow('https://x.com/i/api/1.1/friendships/create.json', 'user_id=1', null)).toBeNull();
   });
 });
+
+import { findCount, numericPaths } from '../src/core/parse/user';
+
+describe('follower counts wherever X puts them', () => {
+  const profile = (result: Record<string, unknown>) => ({
+    data: { user: { result: { __typename: 'User', rest_id: '7', core: { screen_name: 'me', name: 'Me' }, ...result } } },
+  });
+
+  it('reads the classic legacy location', () => {
+    expect(parseProfile(profile({ legacy: { followers_count: 702, friends_count: 610 } }))).toMatchObject({ followersCount: 702, followingCount: 610 });
+  });
+  it('reads counts from other objects X has used', () => {
+    expect(parseProfile(profile({ relationship_counts: { followers: 702, following: 610 } }))).toMatchObject({ followersCount: 702, followingCount: 610 });
+    expect(parseProfile(profile({ public_metrics: { followers_count: 702, following_count: 610 } }))).toMatchObject({ followersCount: 702, followingCount: 610 });
+    expect(parseProfile(profile({ stats: { deep: { followers_count: 702, friends_count: 610 } } }))).toMatchObject({ followersCount: 702, followingCount: 610 });
+  });
+  it('is not fooled by boolean relationship flags called "following"', () => {
+    const p = parseProfile(profile({ relationship_perspectives: { following: true, followed_by: false }, legacy: { followers_count: 5, friends_count: 9 } }));
+    expect(p).toMatchObject({ followersCount: 5, followingCount: 9 });
+    expect(findCount({ relationship_perspectives: { following: true } }, ['following'])).toBeUndefined();
+  });
+  it('leaves counts undefined when they are nowhere to be found', () => {
+    expect(parseProfile(profile({ legacy: { statuses_count: 12 } }))).toMatchObject({ followersCount: undefined, followingCount: undefined });
+  });
+  it('describes where numeric fields live without exposing values', () => {
+    const paths = numericPaths({ legacy: { statuses_count: 12345, nested: { likes: 9 } }, id: 3, name: 'x' });
+    expect(paths).toEqual(['legacy.statuses_count', 'legacy.nested.likes', 'id']);
+    expect(JSON.stringify(paths)).not.toMatch(/12345/);
+  });
+});

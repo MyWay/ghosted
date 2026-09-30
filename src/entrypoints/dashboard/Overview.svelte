@@ -2,7 +2,7 @@
   import { liveQuery } from 'dexie';
   import { browser } from 'wxt/browser';
   import { repo } from '../../ui/repo';
-  import { countSeries, dailyChanges, delta, totals } from '../../ui/stats';
+  import { countSeries, dailyChanges, delta, listGap, totals } from '../../ui/stats';
   import { eventLabel, timeAgo } from '../../ui/format';
   import StatTile from '../../ui/StatTile.svelte';
   import LineChart from '../../ui/LineChart.svelte';
@@ -46,6 +46,7 @@
       days: dailyChanges(d.events, range, now),
       departures: d.events.filter((e) => e.type === 'LOST_FOLLOWER' || e.type === 'LOST_MUTUAL').slice(0, 8),
       lastScan: d.scans.find((s) => s.status === 'committed'),
+      followersGap: listGap(d.scans.find((s) => s.kind === 'followers' && s.status === 'committed')),
       review: d.scans.filter((s) => s.status === 'needs_review').length,
       users: d.users,
     };
@@ -73,7 +74,14 @@
   {#if v.review}<button class="card notice" onclick={() => go('scans')}><strong class="warn">{v.review} scan(s) need your review</strong> <span class="muted">— nothing was applied yet. Open Scans →</span></button>{/if}
 
   <section class="tiles">
-    <StatTile hero label="Followers" value={v.hasFollowers ? v.t.followers : undefined} delta={v.followersDelta} />
+    <StatTile
+      hero
+      label="Followers"
+      value={v.hasFollowers ? v.t.followers : undefined}
+      delta={v.followersDelta}
+      note={v.followersGap ? `X shows ${v.followersGap.xCount.toLocaleString()}` : undefined}
+      noteTitle={v.followersGap ? `X counts ${v.followersGap.gap} account${v.followersGap.gap === 1 ? '' : 's'} it doesn't include in the list (usually suspended or deactivated). Ghosted can only see the list.` : undefined}
+    />
     <div class="small-tiles">
       <StatTile label="Following" value={v.hasFollowing ? v.t.following : undefined} delta={v.followingDelta} />
       <StatTile label="Mutuals" value={v.hasFollowing ? v.t.mutuals : undefined} onclick={() => go('mutuals')} />

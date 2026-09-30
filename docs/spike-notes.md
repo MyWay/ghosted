@@ -18,8 +18,9 @@ synthetic bodies from `tests/helpers.ts`. **Nothing here has run against real X 
          (`legacy.followed_by`, `relationship_perspectives.followed_by`, other)?
    - [ ] Does the last page return zero entries, a repeated cursor, or a `0|` cursor?
    - [ ] Does X use fetch or XHR for these calls?
-   - [ ] Is `UserByScreenName` fetched on a full load of `/<you>/followers`? (Assisted scans rely
-         on it for a fresh expected count; counts older than 1h are ignored.)
+   - [ ] Is `UserByScreenName` fetched when `/<you>` loads? Assisted checks now open your profile
+         before each list to get a fresh follower/following count (the list page alone did not
+         reliably provide one). If it is not sent, the check waits 8s and continues without a count.
    - [ ] Does X ever request the list with the top cursor (e.g. scrolling back up)? Handled as a
          side page either way, but worth confirming.
    - [ ] Does clicking Unfollow on x.com still call `/i/api/1.1/friendships/destroy.json` with
@@ -36,9 +37,14 @@ synthetic bodies from `tests/helpers.ts`. **Nothing here has run against real X 
 - `likely_gone` is a heuristic: a follower who left within 3 days of also vanishing from your
   following list *without* you unfollowing them on x.com. Unfollows done on another device are not
   seen, so there it can still mislabel.
-- If no fresh (< 1h) profile count exists when a scan ends, the count check is skipped and a
-  stricter mass-removal guard applies (hold if more than max(5, 1%) would be removed).
-- The page hook (`x-hook.content.ts`) and bridge have no automated tests; they need a jsdom or
-  real-browser harness.
-- No automated test loads the built extension in a browser; the hook -> bridge -> background path
-  is only covered by build and type checks.
+- If no fresh (< 1h) profile count exists when a scan ends (for example a passive scroll without a
+  profile visit), the count check is skipped and a stricter mass-removal guard applies (hold if more
+  than max(5, 1%) would be removed). Assisted checks avoid this by visiting the profile first.
+- The list is usually shorter than X's follower counter (about 1-2% in one real account), so the
+  completeness threshold (default 90%, changeable in Settings) is checked against the listed accounts
+  plus any marked unavailable. Truncation is also caught by the cursor-chain checks and by the
+  mass-removal review guard.
+- No automated test in the repository loads the built extension in a browser. The profile-first flow
+  was checked once by an end-to-end test in headless Chromium against a mocked x.com (page
+  order, saved counts, no false review hold). That mock follows this project's own assumptions about
+  X's responses, so it does not replace the checklist above.

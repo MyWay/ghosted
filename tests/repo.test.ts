@@ -136,7 +136,7 @@ describe('repo scans', () => {
     await scan('followers', mkUsers(1, 100));
     await repo.setProfileCounts(OWNER, 100, undefined, clock);
     clock += PROFILE_FRESH_MS + 60_000;
-    // 10 people unfollowed since the count was captured; with the stale count (100) this is < 98%.
+    // 10 people unfollowed since the count was captured; with the stale count (100) it would look shorter than expected.
     const r1 = await repo.ingestPage({ ownerId: OWNER, kind: 'followers', page: toPage(mkUsers(1, 90), 'end|1'), now: clock });
     const r = await repo.ingestPage({ ownerId: OWNER, kind: 'followers', requestCursor: 'end|1', page: toPage([]), now: clock });
     expect(r1.status).toBe('collecting');
@@ -229,5 +229,26 @@ describe('maxEventId', () => {
     ]);
     expect(await repo.maxEventId(OWNER)).toBe(2);
     expect(await repo.maxEventId('nobody')).toBe(0);
+  });
+});
+
+import { buildDiagnostics } from '../src/db/diagnostics';
+
+describe('diagnostics', () => {
+  it('summarises scans and counts without names, handles or ids', async () => {
+    await scan('followers', mkUsers(1, 40));
+    const info = await buildDiagnostics(repo, OWNER, { version: '9.9.9', userAgent: 'TestBrowser/1' }, clock + 5 * 60_000);
+    expect(info.version).toBe('9.9.9');
+    expect(info.saved).toEqual({ followers: 40, following: 0 });
+    expect(info.latestScans[0]).toMatchObject({ kind: 'followers', status: 'committed', collected: 40, xCount: 40, unavailable: 0 });
+    expect(info.profileCount).toMatchObject({ followers: 40 });
+    const text = JSON.stringify(info);
+    expect(text).not.toMatch(/user\d+/);
+    expect(text).not.toContain(OWNER);
+  });
+  it('works before any account or scan exists', async () => {
+    const info = await buildDiagnostics(repo, undefined, { version: '1.0.0', userAgent: 'x' });
+    expect(info.latestScans).toEqual([]);
+    expect(info.saved).toBeNull();
   });
 });

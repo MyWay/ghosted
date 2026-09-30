@@ -1,5 +1,6 @@
 import type { ListKind } from '../core/types';
 import type { CaptureReply } from '../messages';
+import { PACES, randomIn, type PaceConfig } from '../core/pace';
 
 export interface Progress {
   collected: number;
@@ -10,13 +11,10 @@ export interface Progress {
 export type Outcome = 'complete' | 'invalid' | 'stopped' | 'timeout' | 'rate-limited';
 
 const NO_PROGRESS_LIMIT_MS = 3 * 60 * 1000;
-const MIN_WAIT_MS = 350;
-const MAX_WAIT_MS = 900;
 /** How long to wait for X to answer after reaching the bottom. */
 const CAPTURE_TIMEOUT_MS = 4000;
 const NUDGE_AFTER_MS = 8000;
 
-const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
@@ -37,6 +35,7 @@ export class AutoScroller {
   constructor(
     private kind: ListKind,
     private cb: { onProgress: (p: Progress) => void; onDone: (o: Outcome) => void },
+    private pace: PaceConfig = PACES.normal,
   ) {}
 
   setPaused(p: boolean) {
@@ -106,7 +105,7 @@ export class AutoScroller {
       window.scrollTo({ top: el.scrollHeight });
       await this.waitForCapture(CAPTURE_TIMEOUT_MS);
       if (!this.running) return;
-      await sleep(rand(MIN_WAIT_MS, MAX_WAIT_MS));
+      await sleep(randomIn(this.pace.pageWaitMs));
     }
   }
 }

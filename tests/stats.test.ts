@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countSeries, dailyChanges, delta, followerChanges, niceTicks, signed, totals } from '../src/ui/stats';
+import { countSeries, dailyChanges, delta, followerChanges, listGap, niceTicks, signed, totals } from '../src/ui/stats';
 import type { EventRow, ScanRow } from '../src/db/schema';
 
 const DAY = 86_400_000;
@@ -93,5 +93,18 @@ describe('followerChanges: mutual events count as follower changes, once', () =>
   });
   it('ignores events that are not follower changes', () => {
     expect(kinds([ev('NEW_FOLLOWING', '1', 0), ev('UNFOLLOWED_BY_ME', '2', 0), ev('RENAME', '3', 0)])).toEqual([]);
+  });
+});
+
+describe('listGap', () => {
+  it('reports how far X\'s counter is above the list, only when it is worth mentioning', () => {
+    expect(listGap({ collected: 690, expected: 702 })).toEqual({ xCount: 702, gap: 12 });
+    expect(listGap({ collected: 700, expected: 702 })).toBeNull();
+    expect(listGap({ collected: 700, expected: 703 })).toEqual({ xCount: 703, gap: 3 });
+  });
+  it('says nothing when the count is unknown or the list is longer', () => {
+    expect(listGap({ collected: 690, expected: undefined })).toBeNull();
+    expect(listGap({ collected: 700, expected: 650 })).toBeNull();
+    expect(listGap(undefined)).toBeNull();
   });
 });

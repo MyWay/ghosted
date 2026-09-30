@@ -32,11 +32,11 @@
     <div class="row">
       <strong>{s.kind}</strong>
       <span class="badge {tone(s.status)}">{s.status.replace('_', ' ')}</span>
-      <span class="grow muted">{timeAgo(s.startedAt)} · {s.collected}{s.expected ? ` of ~${s.expected}` : ''} collected · {s.state.pages} pages</span>
+      <span class="grow muted">{timeAgo(s.startedAt)} · {s.collected}{s.expected ? ` of ~${s.expected}` : ''} collected{s.state.unavailable ? ` + ${s.state.unavailable} unavailable` : ''} · {s.state.pages} pages</span>
     </div>
     {#if s.reason}<div class="muted">{s.reason}</div>{/if}
     {#if s.status === 'needs_review'}
-      <p class="warn">This scan would remove {s.pendingRemoved} accounts, which is unusually many. It may be a truncated list from X. Nothing has been applied.</p>
+      <p class="warn">This scan would remove {s.pendingRemoved} accounts, more than the safety limit allows when your profile's follower count wasn't available to check against. The list itself was read to the end ({s.state.pages} pages, no gaps). Compare "collected" with your follower count on X: a gap of a few percent is normal, because suspended and deactivated accounts count but aren't listed. Nothing has been applied.</p>
       <div class="row">
         <button class="danger" onclick={() => resolve(s.scanId!, true)}>Apply changes</button>
         <button onclick={() => resolve(s.scanId!, false)}>Discard scan</button>

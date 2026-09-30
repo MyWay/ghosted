@@ -6,7 +6,7 @@ const OUTCOME_TEXT: Record<Outcome, string> = {
   invalid: 'Scan could not be verified as complete; nothing was changed.',
   stopped: 'Scan stopped.',
   timeout: 'No progress for 3 minutes; scan abandoned.',
-  'rate-limited': 'X rate-limited the list; scan abandoned. Try again later.',
+  'rate-limited': 'X is limiting requests, so this check stopped. Try again in about 15 minutes, or pick a slower check speed in Settings.',
 };
 
 /** Small status panel in a shadow root so X's CSS cannot affect it (and it cannot affect X). */

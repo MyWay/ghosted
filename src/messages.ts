@@ -1,4 +1,5 @@
 import type { ListKind } from './core/types';
+import type { Pace } from './core/pace';
 import type { ScanStatus } from './db/schema';
 
 export const CHANNEL = 'ghosted';
@@ -37,6 +38,8 @@ export interface CaptureReply {
 
 export interface BridgeReadyReply {
   autoscroll: ListKind | null;
+  /** Check speed chosen in Settings. */
+  pace?: Pace;
 }
 
 export interface CommandReply {

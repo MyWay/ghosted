@@ -2,7 +2,7 @@ import { browser } from 'wxt/browser';
 import { ownerIdFromTwid } from '../core/owner';
 import { isUnfollowUrl, opToKind, parseOperationUrl, parseUnfollow } from '../core/parse/operations';
 import { parseApiErrors, parseTimelinePage } from '../core/parse/timeline';
-import { parseProfile } from '../core/parse/user';
+import { numericPaths, parseProfile, profileResult } from '../core/parse/user';
 import type { ListKind } from '../core/types';
 import { Repo, migrateLegacyDb } from '../db/repo';
 import type {
@@ -13,18 +13,23 @@ import type {
 } from '../messages';
 import { notifyEvents, sendBrowser, testChannel } from '../notify';
 import { refreshBadge } from '../notify/badge';
+import { PACES, asPace, randomIn } from '../core/pace';
+import {
+  PROFILE_WAIT_MS,
+  advanceToList,
+  afterKindDone,
+  answerBridgeReady,
+  newAutoScan,
+  urlFor,
+  type AutoScan,
+} from '../core/autoscan';
 
 const repo = new Repo();
 
-const AUTOSCAN_TTL_MS = 30 * 60 * 1000;
+// Long enough for a slow check of a large account.
+const AUTOSCAN_TTL_MS = 3 * 60 * 60 * 1000;
+const NEXT_LIST_ALARM = 'autoscan-next-list';
 const DEFAULT_REMINDER_HOURS = 24;
-
-interface AutoScan {
-  tabId: number;
-  kinds: ListKind[];
-  handle: string;
-  startedAt: number;
-}
 
 /** Serialize capture handling so page batches never interleave their DB transactions. */
 let queue: Promise<unknown> = Promise.resolve();
@@ -52,7 +57,7 @@ async function setHealth(patch: Record<string, unknown>) {
   await repo.setSetting('health', { ...prev, ...patch });
 }
 
-async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>): Promise<CaptureReply> {
+async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, tabId?: number): Promise<CaptureReply> {
   const now = Date.now();
   const info = parseOperationUrl(msg.url);
   const unfollow = !info && isUnfollowUrl(msg.url);
@@ -75,6 +80,12 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>): P
     if (profile && profile.id === ownerId) {
       await repo.setProfileCounts(ownerId, profile.followersCount, profile.followingCount, now);
       await repo.setSetting('ownerHandle', profile.handle);
+      // Counts missing means X changed where it keeps them: record the response's shape (field
+      // names only, no values) so it can be found and fixed from the diagnostics.
+      const missing = profile.followersCount === undefined || profile.followingCount === undefined;
+      await setHealth({ profileShape: missing ? numericPaths(profileResult(msg.body)) : null });
+      // An assisted check is waiting on the profile page for this count: now open the list.
+      await moveToList(tabId);
     }
     return { handled: true, ignored: 'irrelevant' };
   }
@@ -115,20 +126,17 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>): P
   return { handled: true, kind, status: result.status, reason: result.reason, collected: result.collected, expected };
 }
 
-async function urlFor(handle: string, kind: ListKind) {
-  return `https://x.com/${handle}/${kind}`;
-}
-
 async function startScan(kinds: ListKind[]): Promise<CommandReply> {
   const handle = await repo.getSetting<string | undefined>('ownerHandle', undefined);
   if (!handle) return { ok: false, error: 'Open x.com once while logged in so the extension can learn your handle.' };
   const [active] = await browser.tabs.query({ active: true, currentWindow: true });
-  const url = await urlFor(handle, kinds[0]);
   const onX = active?.id !== undefined && /^https:\/\/(x|twitter)\.com\//.test(active.url ?? '');
+  // Placeholder tab id: the real one is known only after the tab is opened.
+  const draft = newAutoScan(-1, kinds, handle, Date.now());
+  const url = urlFor(draft);
   const tab = onX ? await browser.tabs.update(active.id!, { url }) : await browser.tabs.create({ url, active: true });
   if (tab?.id === undefined) return { ok: false, error: 'Could not open a tab.' };
-  const scan: AutoScan = { tabId: tab.id, kinds, handle, startedAt: Date.now() };
-  await browser.storage.session.set({ autoscan: scan });
+  await browser.storage.session.set({ autoscan: { ...draft, tabId: tab.id } });
   return { ok: true };
 }
 
@@ -142,28 +150,48 @@ async function getAutoScan(): Promise<AutoScan | undefined> {
   return scan;
 }
 
+/** Profile phase is over (count captured, or we stopped waiting): send the tab to the list page. */
+async function moveToList(tabId?: number, step?: number) {
+  const next = advanceToList(await getAutoScan(), tabId, Date.now(), step);
+  if (!next) return;
+  await browser.storage.session.set({ autoscan: next });
+  await browser.tabs.update(next.tabId, { url: urlFor(next) }).catch(() => {});
+}
+
 async function handleBridgeReady(msg: { path: string }, tabId: number | undefined): Promise<BridgeReadyReply> {
   const scan = await getAutoScan();
-  if (!scan || tabId !== scan.tabId) return { autoscroll: null };
-  const wanted = `/${scan.handle}/${scan.kinds[0]}`.toLowerCase();
-  return { autoscroll: msg.path.toLowerCase().replace(/\/$/, '') === wanted ? scan.kinds[0] : null };
+  const answer = answerBridgeReady(scan, tabId, msg.path);
+  // If X never sends the profile count (cached, or the request changed), do not hang: carry on without it.
+  // The timer only applies to this profile step; a later one has its own.
+  if (answer.waitForProfile && scan) {
+    const step = scan.startedAt;
+    setTimeout(() => void moveToList(tabId, step), PROFILE_WAIT_MS);
+  }
+  return { autoscroll: answer.autoscroll, pace: asPace(await repo.getSetting('pace', undefined)) };
 }
 
 async function handleScanFinished(msg: Extract<ToBackground, { type: 'scan-finished' }>) {
   const scan = await getAutoScan();
   if (!scan) return;
-  const rest = scan.kinds.slice(1);
   const aborted = msg.outcome === 'stopped' || msg.outcome === 'rate-limited' || msg.outcome === 'timeout';
-  if (rest.length && !aborted) {
-    await browser.storage.session.set({ autoscan: { ...scan, kinds: rest, startedAt: Date.now() } });
+  const next = aborted ? null : afterKindDone(scan, Date.now());
+  if (next) {
+    await browser.storage.session.set({ autoscan: next });
     // Small pause so two full scans are not back-to-back.
-    setTimeout(async () => {
-      await browser.tabs.update(scan.tabId, { url: await urlFor(scan.handle, rest[0]) }).catch(() => {});
-    }, 4000 + Math.random() * 4000);
+    const wait = randomIn(PACES[asPace(await repo.getSetting('pace', undefined))].betweenListsMs);
+    // The background script can be stopped after ~30s idle, so long pauses use an alarm, not a timer.
+    if (wait >= 30_000) browser.alarms.create(NEXT_LIST_ALARM, { when: Date.now() + wait });
+    else setTimeout(() => void openNextList(), wait);
     return;
   }
   await browser.storage.session.remove('autoscan');
-  if (msg.outcome === 'rate-limited') await sendBrowser('Ghosted', 'X rate-limited the list. Scan abandoned; try again later.');
+  if (msg.outcome === 'rate-limited')
+    await sendBrowser('Ghosted', 'X is limiting requests, so the check stopped. Try again in about 15 minutes, or choose a slower check speed in Settings.');
+}
+
+async function openNextList() {
+  const scan = await getAutoScan();
+  if (scan) await browser.tabs.update(scan.tabId, { url: urlFor(scan) }).catch(() => {});
 }
 
 async function checkScanDue() {
@@ -194,7 +222,7 @@ export default defineBackground(() => {
     };
     switch (msg?.type) {
       case 'capture':
-        return respond(enqueue(() => handleCapture(msg)));
+        return respond(enqueue(() => handleCapture(msg, sender.tab?.id)));
       case 'bridge-ready':
         return respond(handleBridgeReady(msg, sender.tab?.id));
       case 'owner-handle':
@@ -230,6 +258,7 @@ export default defineBackground(() => {
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'stale-sessions') void enqueue(() => repo.abandonStale(Date.now()));
     if (alarm.name === 'scan-due') void checkScanDue();
+    if (alarm.name === NEXT_LIST_ALARM) void openNextList();
   });
 
   browser.notifications.onClicked.addListener((id) => {

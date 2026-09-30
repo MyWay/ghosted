@@ -3,12 +3,16 @@
   import { repo } from '../../ui/repo';
   import { download, toCsv } from '../../ui/format';
   import { loadPrefs, savePrefs } from '../../notify';
+  import { DEFAULT_THRESHOLD } from '../../core/session';
+  import { DEFAULT_PACE, asPace, type Pace } from '../../core/pace';
+  import { buildDiagnostics } from '../../db/diagnostics';
   import { DEFAULT_PREFS, type NotifyPrefs } from '../../notify/format';
 
   let { ownerId }: { ownerId?: string } = $props();
 
   let threshold = $state(98);
   let reminderHours = $state(24);
+  let pace = $state<Pace>(DEFAULT_PACE);
   let prefs = $state<NotifyPrefs>({ ...DEFAULT_PREFS });
   let tgToken = $state('');
   let tgChat = $state('');
@@ -18,8 +22,9 @@
 
   $effect(() => {
     (async () => {
-      threshold = Math.round((await repo.getSetting('threshold', 0.98)) * 100);
+      threshold = Math.round((await repo.getSetting('threshold', DEFAULT_THRESHOLD)) * 100);
       reminderHours = await repo.getSetting('reminderHours', 24);
+      pace = asPace(await repo.getSetting('pace', undefined));
       prefs = await loadPrefs();
       tgToken = prefs.telegram?.token ?? '';
       tgChat = prefs.telegram?.chatId ?? '';
@@ -40,6 +45,7 @@
     }
     await repo.setSetting('threshold', Math.min(1, Math.max(0.5, threshold / 100)));
     await repo.setSetting('reminderHours', Math.max(0, reminderHours));
+    await repo.setSetting('pace', pace);
     await savePrefs({
       ...prefs,
       telegram: tgToken && tgChat ? { token: tgToken.trim(), chatId: tgChat.trim() } : undefined,
@@ -61,6 +67,18 @@
     await save();
     const r = (await browser.runtime.sendMessage({ type: 'test-notify', channel })) as { ok: boolean; error?: string };
     status = r?.ok ? `${channel} test sent.` : `${channel} test failed: ${r?.error}`;
+  }
+
+  let diagnostics = $state('');
+  async function copyDiagnostics() {
+    const info = await buildDiagnostics(repo, ownerId, { version: browser.runtime.getManifest().version, userAgent: navigator.userAgent });
+    diagnostics = JSON.stringify(info, null, 2);
+    try {
+      await navigator.clipboard.writeText(diagnostics);
+      status = 'Diagnostics copied. Paste them into your bug report.';
+    } catch {
+      status = 'Could not copy automatically. Select the text below and copy it.';
+    }
   }
 
   async function exportJson() {
@@ -96,6 +114,15 @@
     <h3>Scanning</h3>
     <label>Completeness threshold (% of expected count) <input type="number" min="50" max="100" bind:value={threshold} /></label>
     <label>Remind me to scan every (hours, 0 = never) <input type="number" min="0" bind:value={reminderHours} /></label>
+    <label>
+      Check speed
+      <select bind:value={pace}>
+        <option value="normal">Normal: fastest</option>
+        <option value="careful">Careful: about 3× slower</option>
+        <option value="slow">Slow: for very large accounts</option>
+      </select>
+    </label>
+    <p class="muted">If X stops a check with a rate limit, choose a slower speed. Slower checks send X fewer requests per minute; they make limits less likely but cannot rule them out.</p>
   </section>
 
   <section class="card grid">
@@ -123,11 +150,18 @@
       <button class="danger" onclick={wipe}>Delete all data</button>
     </div>
   </section>
+  <section class="card grid">
+    <h3>Diagnostics</h3>
+    <p class="muted">Something not adding up? Copy a short technical summary (no names or handles) to include in a bug report.</p>
+    <div class="row"><button onclick={copyDiagnostics}>Copy diagnostics</button></div>
+    {#if diagnostics}<textarea readonly rows="10" onfocus={(e) => e.currentTarget.select()}>{diagnostics}</textarea>{/if}
+  </section>
   {#if status}<p class="warn">{status}</p>{/if}
 {/if}
 
 <style>
   .grid { display: grid; gap: 10px; }
   label { display: grid; gap: 4px; }
+  textarea { width: 100%; font: 12px ui-monospace, monospace; color: var(--text); background: #ffffff0a; border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; }
   label:has(input[type='checkbox']) { display: flex; align-items: center; gap: 8px; }
 </style>
