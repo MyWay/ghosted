@@ -21,6 +21,10 @@ button:hover:not(:disabled) { background: #ffffff1c; }
 button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--amber); color: #1c0d0b; font-weight: 700; border-color: transparent; }
 button.danger { background: var(--rose); color: #fff; border-color: transparent; }
+button.primary:hover:not(:disabled) { background: #eeb24d; box-shadow: 0 0 0 3px #e0a33a33; }
+button.primary:active:not(:disabled) { background: #cf922c; }
+button.danger:hover:not(:disabled) { background: #f27d75; }
+button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .muted { color: var(--muted); }
 .bad { color: var(--rose); } .good { color: var(--green); } .warn { color: var(--amber); }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
