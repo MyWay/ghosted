@@ -25,7 +25,7 @@ WHAT YOU GET
 • Boomerangs: people who unfollowed you more than once, with a badge for repeat offenders
 • Follower growth charts: followers over time, and gained vs lost per day
 • A red number on the toolbar icon when someone unfollows you
-• Optional alerts on Telegram or Discord
+• Optional alerts on Telegram, Discord, or your own webhook (n8n, Zapier, Slack, Home Assistant…)
 • Backup and restore: export your history as a file, import it on another computer
 • Notices renamed accounts, so a new @handle isn't reported as an unfollow
 

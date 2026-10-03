@@ -1,12 +1,12 @@
 <script lang="ts">
   import { browser } from 'wxt/browser';
   import { repo } from '../../ui/repo';
-  import { download, toCsv } from '../../ui/format';
-  import { loadPrefs, savePrefs } from '../../notify';
+  import { download, timeAgo, toCsv } from '../../ui/format';
+  import { loadNotifyErrors, loadPrefs, savePrefs, webhookAllowed, type Channel, type NotifyErrors } from '../../notify';
   import { DEFAULT_THRESHOLD } from '../../core/session';
   import { DEFAULT_PACE, asPace, type Pace } from '../../core/pace';
   import { buildDiagnostics } from '../../db/diagnostics';
-  import { DEFAULT_PREFS, type NotifyPrefs } from '../../notify/format';
+  import { DEFAULT_PREFS, parseHeaders, templateError, webhookOrigin, type NotifyPrefs } from '../../notify/format';
 
   let { ownerId }: { ownerId?: string } = $props();
 
@@ -17,6 +17,13 @@
   let tgToken = $state('');
   let tgChat = $state('');
   let discordUrl = $state('');
+  let webhookUrl = $state('');
+  let webhookHeaders = $state('');
+  let webhookTemplate = $state('');
+  let webhookRevoked = $state(false);
+  let notifyErrors = $state<NotifyErrors>({});
+  const names: Record<Channel, string> = { browser: 'Browser', telegram: 'Telegram', discord: 'Discord', webhook: 'Webhook' };
+  const badHeaders = $derived(parseHeaders(webhookHeaders).invalid);
   let status = $state('');
   let loaded = $state(false);
 
@@ -29,6 +36,11 @@
       tgToken = prefs.telegram?.token ?? '';
       tgChat = prefs.telegram?.chatId ?? '';
       discordUrl = prefs.discord?.url ?? '';
+      webhookUrl = prefs.webhook?.url ?? '';
+      webhookHeaders = prefs.webhook?.headers ?? '';
+      webhookTemplate = prefs.webhook?.template ?? '';
+      webhookRevoked = !!prefs.webhook?.url && !(await webhookAllowed(prefs.webhook.url));
+      notifyErrors = await loadNotifyErrors();
       loaded = true;
     })();
   });
@@ -39,6 +51,23 @@
     const origins: string[] = [];
     if (tgToken && tgChat) origins.push('https://api.telegram.org/*');
     if (discordUrl) origins.push(...discordOrigins(discordUrl));
+    if (webhookUrl.trim()) {
+      const o = webhookOrigin(webhookUrl);
+      if ('error' in o) {
+        status = o.error;
+        return;
+      }
+      const bodyError = templateError({ url: webhookUrl, headers: webhookHeaders, template: webhookTemplate });
+      if (bodyError) {
+        status = bodyError;
+        return;
+      }
+      if (badHeaders.length) {
+        status = `Webhook header lines need the form "Name: value": ${badHeaders.join(', ')}`;
+        return;
+      }
+      origins.push(o.origin);
+    }
     if (origins.length && !(await browser.permissions.request({ origins }))) {
       status = 'Permission for the notification service was denied.';
       return;
@@ -50,7 +79,9 @@
       ...prefs,
       telegram: tgToken && tgChat ? { token: tgToken.trim(), chatId: tgChat.trim() } : undefined,
       discord: discordUrl ? { url: discordUrl.trim() } : undefined,
+      webhook: webhookUrl.trim() ? { url: webhookUrl.trim(), headers: webhookHeaders.trim() || undefined, template: webhookTemplate.trim() || undefined } : undefined,
     });
+    webhookRevoked = false;
     status = 'Saved.';
   }
 
@@ -63,10 +94,12 @@
     }
   }
 
-  async function test(channel: 'browser' | 'telegram' | 'discord') {
+  async function test(channel: Channel) {
     await save();
+    if (status !== 'Saved.') return;
     const r = (await browser.runtime.sendMessage({ type: 'test-notify', channel })) as { ok: boolean; error?: string };
-    status = r?.ok ? `${channel} test sent.` : `${channel} test failed: ${r?.error}`;
+    status = r?.ok ? `${names[channel]} test sent.` : `${names[channel]} test failed: ${r?.error}`;
+    notifyErrors = await loadNotifyErrors();
   }
 
   let diagnostics = $state('');
@@ -108,6 +141,13 @@
   }
 </script>
 
+{#snippet lastErrors(channels: Channel[])}
+  {#each channels as c}
+    {@const e = notifyErrors[c]}
+    {#if e}<p class="bad">{names[c]} alert failed {timeAgo(e.at)}: {e.message}</p>{/if}
+  {/each}
+{/snippet}
+
 <h2>Settings</h2>
 {#if loaded}
   <section class="card grid">
@@ -133,11 +173,38 @@
     <label>Telegram chat id <input bind:value={tgChat} /></label>
     <label>Discord webhook URL <input type="password" bind:value={discordUrl} /></label>
     <p class="muted">Tokens are stored unencrypted in this browser profile only. They are sent solely to Telegram / Discord.</p>
+    {@render lastErrors(['browser', 'telegram', 'discord'])}
     <div class="row">
       <button class="primary" onclick={save}>Save</button>
       <button onclick={() => test('browser')}>Test browser</button>
       <button onclick={() => test('telegram')} disabled={!tgToken || !tgChat}>Test Telegram</button>
       <button onclick={() => test('discord')} disabled={!discordUrl}>Test Discord</button>
+    </div>
+  </section>
+
+  <section class="card grid">
+    <h3>Webhook</h3>
+    <p class="muted">Send each alert as a POST request to your own URL: n8n, Make, Zapier, Home Assistant, Slack, ntfy, or your own server. Plain http works only for localhost.</p>
+    {@render lastErrors(['webhook'])}
+    {#if webhookRevoked}<p class="bad">The browser no longer allows Ghosted to reach this URL. Press Save to allow it again.</p>{/if}
+    <label>Webhook URL <input type="password" placeholder="https://…" bind:value={webhookUrl} /></label>
+    <label>
+      Headers (optional, one "Name: value" per line)
+      <textarea rows="2" placeholder="Authorization: Bearer …" bind:value={webhookHeaders}></textarea>
+      {#if badHeaders.length}<span class="bad">Not a valid header: {badHeaders.join(', ')}</span>{/if}
+    </label>
+    <label>
+      Body (optional; empty sends the standard JSON)
+      <textarea rows="3" placeholder={'{"text": "{{summary}}"}'} bind:value={webhookTemplate}></textarea>
+    </label>
+    <p class="muted">
+      Placeholders: <code>{'{{summary}}'}</code> <code>{'{{count}}'}</code> <code>{'{{account}}'}</code> <code>{'{{at}}'}</code>
+      <code>{'{{events}}'}</code> (JSON list) and <code>{'{{json}}'}</code> (the whole standard body). In a JSON body, text is escaped for
+      use inside quotes. Set a <code>Content-Type</code> header to send plain text instead. Headers are stored unencrypted in this browser profile.
+    </p>
+    <div class="row">
+      <button class="primary" onclick={save}>Save</button>
+      <button onclick={() => test('webhook')} disabled={!webhookUrl.trim()}>Send test</button>
     </div>
   </section>
 
@@ -163,5 +230,6 @@
   .grid { display: grid; gap: 10px; }
   label { display: grid; gap: 4px; }
   textarea { width: 100%; font: 12px ui-monospace, monospace; color: var(--text); background: #ffffff0a; border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; }
+  code { font-size: 12px; }
   label:has(input[type='checkbox']) { display: flex; align-items: center; gap: 8px; }
 </style>

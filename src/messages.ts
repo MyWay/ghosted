@@ -23,7 +23,7 @@ export type ToBackground =
   // popup / dashboard -> background
   | { type: 'start-scan'; kinds: ListKind[] }
   | { type: 'resolve-review'; scanId: number; accept: boolean }
-  | { type: 'test-notify'; channel: 'browser' | 'telegram' | 'discord' };
+  | { type: 'test-notify'; channel: 'browser' | 'telegram' | 'discord' | 'webhook' };
 
 export interface CaptureReply {
   handled: boolean;

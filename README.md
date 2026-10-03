@@ -11,7 +11,7 @@
 - Shows who **doesn't follow you back**
 - Spots **boomerangs**: people who keep unfollowing and following you again
 - A red number on the toolbar icon when someone leaves
-- Optional alerts on **Telegram** or **Discord**
+- Optional alerts on **Telegram**, **Discord**, or **any webhook** (n8n, Zapier, Slack, Home Assistant…)
 
 No account, no server, no X password. Your data never leaves your computer.
 

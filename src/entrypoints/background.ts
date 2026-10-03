@@ -13,7 +13,8 @@ import type {
 } from '../messages';
 import { notifyEvents, sendBrowser, testChannel } from '../notify';
 import { refreshBadge } from '../notify/badge';
-import { withoutRepeats } from '../core/follows';
+import { findBoomerangs, withoutRepeats } from '../core/follows';
+import type { EventRow } from '../db/schema';
 import { PACES, asPace, randomIn } from '../core/pace';
 import {
   PROFILE_WAIT_MS,
@@ -121,10 +122,24 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
   const result = await repo.ingestPage({ ownerId, kind, requestCursor: info.cursor, page, now });
   await setHealth({ lastCaptureAt: now, lastParseError: null });
   if (result.committed?.events.length) {
-    await notifyEvents(withoutRepeats(result.committed.events, await repo.allEvents(ownerId)));
     await refreshBadge(repo);
+    notifyCommitted(ownerId, result.committed.events);
   }
   return { handled: true, kind, status: result.status, reason: result.reason, collected: result.collected, expected };
+}
+
+/**
+ * Alert about a committed scan, minus departures the other list already reported. Not awaited by
+ * callers: a slow alert service must never hold up the capture queue (and with it the check).
+ */
+function notifyCommitted(ownerId: string, events: EventRow[]): void {
+  void (async () => {
+    const history = await repo.allEvents(ownerId);
+    await notifyEvents(withoutRepeats(events, history), {
+      account: await repo.getSetting<string | undefined>('ownerHandle', undefined),
+      boomerangs: new Map(findBoomerangs(history).map((b) => [b.userId, b.cycles])),
+    });
+  })().catch(() => {});
 }
 
 async function startScan(kinds: ListKind[]): Promise<CommandReply> {
@@ -237,14 +252,16 @@ export default defineBackground(() => {
           enqueue(async () => {
             const r = await repo.resolveReview(msg.scanId, msg.accept);
             if (r?.events.length) {
-              await notifyEvents(withoutRepeats(r.events, await repo.allEvents(r.events[0].ownerId)));
               await refreshBadge(repo);
+              notifyCommitted(r.events[0].ownerId, r.events);
             }
             return { ok: true };
           }),
         );
       case 'test-notify':
-        return respond(testChannel(msg.channel).then(() => ({ ok: true })));
+        return respond(
+          repo.getSetting<string | undefined>('ownerHandle', undefined).then((h) => testChannel(msg.channel, h)).then(() => ({ ok: true })),
+        );
       default:
         return false;
     }
