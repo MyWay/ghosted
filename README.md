@@ -9,6 +9,7 @@
 
 - Tells you **who unfollowed you**, and who followed you
 - Shows who **doesn't follow you back**
+- Spots **boomerangs**: people who keep unfollowing and following you again
 - A red number on the toolbar icon when someone leaves
 - Optional alerts on **Telegram** or **Discord**
 

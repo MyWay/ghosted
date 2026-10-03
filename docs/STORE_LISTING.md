@@ -22,6 +22,7 @@ WHAT YOU GET
 • Unfollowers: a timeline of everyone who left, with their avatar and handle
 • New followers and lost mutuals
 • People you follow who don't follow you back, plus fans you don't follow back
+• Boomerangs: people who unfollowed you more than once, with a badge for repeat offenders
 • Follower growth charts: followers over time, and gained vs lost per day
 • A red number on the toolbar icon when someone unfollows you
 • Optional alerts on Telegram or Discord
