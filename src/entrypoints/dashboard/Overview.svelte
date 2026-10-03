@@ -4,7 +4,7 @@
   import { repo } from '../../ui/repo';
   import { countSeries, dailyChanges, delta, listGap, totals } from '../../ui/stats';
   import { eventLabel, timeAgo } from '../../ui/format';
-  import { withoutRepeats } from '../../core/follows';
+  import { cycleBadge, findBoomerangs, withoutRepeats } from '../../core/follows';
   import StatTile from '../../ui/StatTile.svelte';
   import LineChart from '../../ui/LineChart.svelte';
   import DivergingBars from '../../ui/DivergingBars.svelte';
@@ -46,6 +46,7 @@
       followingDelta: delta(followingSeries, WEEK, now),
       days: dailyChanges(d.events, range, now),
       departures: withoutRepeats(d.events.filter((e) => e.type === 'LOST_FOLLOWER' || e.type === 'LOST_MUTUAL'), d.events).slice(0, 8),
+      badges: new Map(findBoomerangs(d.events).map((u) => [u.userId, cycleBadge(u.cycles)!])),
       lastScan: d.scans.find((s) => s.status === 'committed'),
       followersGap: listGap(d.scans.find((s) => s.kind === 'followers' && s.status === 'committed')),
       review: d.scans.filter((s) => s.status === 'needs_review').length,
@@ -118,6 +119,7 @@
     {#each v.departures as e (e.id)}
       <div class="dep row">
         <div class="grow"><Person handle={e.handle} user={v.users.get(e.userId)} sub={eventLabel(e)} /></div>
+        {#if v.badges.get(e.userId)}{@const b = v.badges.get(e.userId)!}<button class="badge {b.tier}" title="Unfollowed you several times. See Boomerangs." onclick={() => go('boomerangs')}>{b.emoji} {b.label}</button>{/if}
         <span class="muted">{timeAgo(e.at)}</span>
       </div>
     {:else}

@@ -8,16 +8,18 @@
   import Overview from './Overview.svelte';
   import Timeline from './Timeline.svelte';
   import Lists from './Lists.svelte';
+  import Boomerangs from './Boomerangs.svelte';
   import Scans from './Scans.svelte';
   import Settings from './Settings.svelte';
 
-  type Tab = 'overview' | 'timeline' | 'not-following-back' | 'fans' | 'mutuals' | 'scans' | 'settings';
+  type Tab = 'overview' | 'timeline' | 'not-following-back' | 'fans' | 'mutuals' | 'boomerangs' | 'scans' | 'settings';
   const tabs: Array<[Tab, string, ComponentProps<typeof Icon>['name']]> = [
     ['overview', 'Overview', 'overview'],
     ['timeline', 'Timeline', 'timeline'],
     ['not-following-back', 'Not following back', 'userx'],
     ['fans', 'Fans', 'users'],
     ['mutuals', 'Mutuals', 'heart'],
+    ['boomerangs', 'Boomerangs', 'repeat'],
     ['scans', 'Scans', 'scans'],
     ['settings', 'Settings', 'settings'],
   ];
@@ -92,6 +94,7 @@
       {:else if tab === 'not-following-back'}<Lists ownerId={$owner.ownerId} mode="not-following-back" />
       {:else if tab === 'fans'}<Lists ownerId={$owner.ownerId} mode="fans" />
       {:else if tab === 'mutuals'}<Lists ownerId={$owner.ownerId} mode="mutuals" />
+      {:else if tab === 'boomerangs'}<Boomerangs ownerId={$owner.ownerId} />
       {:else if tab === 'scans'}<Scans ownerId={$owner.ownerId} />{/if}
     {/if}
   </main>

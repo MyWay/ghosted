@@ -36,6 +36,10 @@ select option, select optgroup { background: var(--surface); color: var(--text);
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--soft); flex-shrink: 0; object-fit: cover; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); }
+.badge.bronze { color: #e0a27a; border-color: #e0a27a55; background: #e0a27a14; }
+.badge.silver { color: #d4d8de; border-color: #d4d8de55; background: #d4d8de14; }
+.badge.gold { color: var(--amber); border-color: #e0a33a66; background: #e0a33a1a; }
+button.badge { cursor: pointer; white-space: nowrap; }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 
 .stat-label { color: var(--muted); font-size: 12px; }
