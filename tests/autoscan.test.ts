@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceToList, afterKindDone, answerBridgeReady, newAutoScan, urlFor } from '../src/core/autoscan';
+import { advanceToList, afterKindDone, answerBridgeReady, newAutoScan, stepOf, urlFor } from '../src/core/autoscan';
 
 const scan = () => newAutoScan(7, ['following', 'followers'], 'maya', 1000);
 
@@ -55,5 +55,20 @@ describe('profile fallback timer', () => {
     expect(advanceToList(secondProfile, 7, 9000, armedFor)).toBeNull();
     expect(advanceToList(secondProfile, 7, 9000, secondProfile.startedAt)?.phase).toBe('list');
     expect(advanceToList(secondProfile, 7, 9000)?.phase).toBe('list');
+  });
+});
+
+describe('stepOf', () => {
+  it('counts lists as the check moves on', () => {
+    const first = advanceToList(scan(), 7, 2000)!;
+    expect(stepOf(first)).toEqual({ index: 1, total: 2 });
+    const second = afterKindDone(first, 3000)!;
+    expect(stepOf(second)).toEqual({ index: 2, total: 2 });
+    expect(stepOf(advanceToList(second, 7, 4000)!)).toEqual({ index: 2, total: 2 });
+  });
+  it('a single-list check is 1 of 1, and old saved state without a total still works', () => {
+    expect(stepOf(newAutoScan(7, ['followers'], 'maya', 0))).toEqual({ index: 1, total: 1 });
+    const { total: _, ...old } = scan();
+    expect(stepOf(old)).toEqual({ index: 1, total: 2 });
   });
 });

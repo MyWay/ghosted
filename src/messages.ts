@@ -34,12 +34,22 @@ export interface CaptureReply {
   expected?: number;
   kind?: ListKind;
   rateLimited?: boolean;
+  /** The scan committed as the first one for this list: a starting point, so no changes yet. */
+  baseline?: boolean;
 }
 
 export interface BridgeReadyReply {
   autoscroll: ListKind | null;
   /** Check speed chosen in Settings. */
   pace?: Pace;
+  /** Position of this list in the check, for "1 of 2". */
+  step?: { index: number; total: number };
+}
+
+export interface ScanFinishedReply {
+  ok: boolean;
+  /** The list the check moves on to, and roughly when its page opens. */
+  next?: { kind: ListKind; inMs: number };
 }
 
 export interface CommandReply {

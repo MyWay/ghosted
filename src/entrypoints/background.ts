@@ -9,6 +9,7 @@ import type {
   BridgeReadyReply,
   CaptureReply,
   CommandReply,
+  ScanFinishedReply,
   ToBackground,
 } from '../messages';
 import { notifyEvents, sendBrowser, testChannel } from '../notify';
@@ -22,6 +23,7 @@ import {
   afterKindDone,
   answerBridgeReady,
   newAutoScan,
+  stepOf,
   urlFor,
   type AutoScan,
 } from '../core/autoscan';
@@ -125,7 +127,15 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
     await refreshBadge(repo);
     notifyCommitted(ownerId, result.committed.events);
   }
-  return { handled: true, kind, status: result.status, reason: result.reason, collected: result.collected, expected };
+  return {
+    handled: true,
+    kind,
+    status: result.status,
+    reason: result.reason,
+    collected: result.collected,
+    expected,
+    ...(result.committed?.baseline ? { baseline: true } : {}),
+  };
 }
 
 /**
@@ -183,12 +193,16 @@ async function handleBridgeReady(msg: { path: string }, tabId: number | undefine
     const step = scan.startedAt;
     setTimeout(() => void moveToList(tabId, step), PROFILE_WAIT_MS);
   }
-  return { autoscroll: answer.autoscroll, pace: asPace(await repo.getSetting('pace', undefined)) };
+  return {
+    autoscroll: answer.autoscroll,
+    pace: asPace(await repo.getSetting('pace', undefined)),
+    ...(answer.autoscroll && scan ? { step: stepOf(scan) } : {}),
+  };
 }
 
-async function handleScanFinished(msg: Extract<ToBackground, { type: 'scan-finished' }>) {
+async function handleScanFinished(msg: Extract<ToBackground, { type: 'scan-finished' }>): Promise<ScanFinishedReply> {
   const scan = await getAutoScan();
-  if (!scan) return;
+  if (!scan) return { ok: true };
   const aborted = msg.outcome === 'stopped' || msg.outcome === 'rate-limited' || msg.outcome === 'timeout';
   const next = aborted ? null : afterKindDone(scan, Date.now());
   if (next) {
@@ -198,11 +212,12 @@ async function handleScanFinished(msg: Extract<ToBackground, { type: 'scan-finis
     // The background script can be stopped after ~30s idle, so long pauses use an alarm, not a timer.
     if (wait >= 30_000) browser.alarms.create(NEXT_LIST_ALARM, { when: Date.now() + wait });
     else setTimeout(() => void openNextList(), wait);
-    return;
+    return { ok: true, next: { kind: next.kinds[0], inMs: wait } };
   }
   await browser.storage.session.remove('autoscan');
   if (msg.outcome === 'rate-limited')
     await sendBrowser('Ghosted', 'X is limiting requests, so the check stopped. Try again in about 15 minutes, or choose a slower check speed in Settings.');
+  return { ok: true };
 }
 
 async function openNextList() {
@@ -244,7 +259,7 @@ export default defineBackground(() => {
       case 'owner-handle':
         return respond(repo.setSetting('ownerHandle', msg.handle).then(() => ({ ok: true })));
       case 'scan-finished':
-        return respond(handleScanFinished(msg).then(() => ({ ok: true })));
+        return respond(handleScanFinished(msg));
       case 'start-scan':
         return respond(startScan(msg.kinds));
       case 'resolve-review':

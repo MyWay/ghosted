@@ -10,6 +10,8 @@ export interface AutoScan {
   handle: string;
   startedAt: number;
   phase: 'profile' | 'list';
+  /** Lists in the whole check (`kinds` shrinks as lists finish). Missing in state saved by older versions. */
+  total?: number;
 }
 
 /** How long to wait on the profile page for the count before moving on anyway. */
@@ -21,7 +23,14 @@ export const newAutoScan = (tabId: number, kinds: ListKind[], handle: string, no
   handle,
   startedAt: now,
   phase: 'profile',
+  total: kinds.length,
 });
+
+/** Which list of the check is current, 1-based: "1 of 2". */
+export const stepOf = (s: AutoScan): { index: number; total: number } => {
+  const total = Math.max(s.total ?? s.kinds.length, s.kinds.length);
+  return { index: total - s.kinds.length + 1, total };
+};
 
 /** Page the tab should be on for the current phase. */
 export function urlFor(s: AutoScan): string {
