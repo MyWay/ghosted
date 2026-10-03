@@ -1,5 +1,6 @@
 import type { ListKind, MemberRow } from '../core/types';
 import type { EventRow, ScanRow } from '../db/schema';
+import { distinctChanges, followChange, type FollowChange } from '../core/follows';
 
 export interface Totals {
   followers: number;
@@ -72,39 +73,18 @@ const startOfDay = (ts: number) => {
   return d.getTime();
 };
 
-/** Followers gained / lost per local day, for the last `days` days including today. */
-/** The same departure can be reported by both lists (following scan: LOST_MUTUAL, followers scan: LOST_FOLLOWER). */
-const DUPLICATE_WINDOW_MS = 3 * 86_400_000;
-
 export interface FollowerChange {
   at: number;
-  kind: 'gain' | 'loss';
+  kind: FollowChange;
   userId: string;
 }
 
-/**
- * Follower gains and losses, with duplicates removed. "Followed you back" (NEW_MUTUAL) is a gain and
- * "stopped following you back" (LOST_MUTUAL) is a loss, because someone you follow who stops or starts
- * following you changes your follower count too. The follower scan later reports the same person again,
- * so a second event of the same kind for the same user within 3 days is ignored.
- */
+/** Follower gains and losses, each counted once although both lists can report it (see `distinctChanges`). */
 export function followerChanges(events: EventRow[]): FollowerChange[] {
-  const kindOf = (t: EventRow['type']) =>
-    t === 'NEW_FOLLOWER' || t === 'NEW_MUTUAL' ? 'gain' : t === 'LOST_FOLLOWER' || t === 'LOST_MUTUAL' ? 'loss' : null;
-  const last = new Map<string, number>();
-  const out: FollowerChange[] = [];
-  for (const e of [...events].sort((a, b) => a.at - b.at)) {
-    const kind = kindOf(e.type);
-    if (!kind) continue;
-    const key = `${kind}:${e.userId}`;
-    const prev = last.get(key);
-    if (prev !== undefined && e.at - prev < DUPLICATE_WINDOW_MS) continue;
-    last.set(key, e.at);
-    out.push({ at: e.at, kind, userId: e.userId });
-  }
-  return out;
+  return distinctChanges(events).map((e) => ({ at: e.at, kind: followChange(e.type)!, userId: e.userId }));
 }
 
+/** Followers gained / lost per local day, for the last `days` days including today. */
 export function dailyChanges(events: EventRow[], days: number, now: number): DayChange[] {
   const today = startOfDay(now);
   const out: DayChange[] = [];

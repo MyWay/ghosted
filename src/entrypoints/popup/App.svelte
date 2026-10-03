@@ -6,6 +6,7 @@
   import { hasXAccess, requestXAccess } from '../../ui/access';
   import { compact, totals } from '../../ui/stats';
   import { refreshBadge, seenKey } from '../../notify/badge';
+  import { withoutRepeats } from '../../core/follows';
   import type { EventRow } from '../../db/schema';
   import Icon from '../../ui/Icon.svelte';
 
@@ -20,7 +21,7 @@
       repo.getSetting<Record<string, any>>('health', {}),
       repo.lastCommit(ownerId, 'following'),
       repo.lastCommit(ownerId, 'followers'),
-      repo.recentEvents(ownerId, 8),
+      repo.allEvents(ownerId).then((all) => withoutRepeats(all, all).slice(0, 8)),
       repo.listScans(ownerId, 20),
       repo.listMembers(ownerId, 'following'),
       repo.listMembers(ownerId, 'followers'),

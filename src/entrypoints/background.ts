@@ -13,6 +13,7 @@ import type {
 } from '../messages';
 import { notifyEvents, sendBrowser, testChannel } from '../notify';
 import { refreshBadge } from '../notify/badge';
+import { withoutRepeats } from '../core/follows';
 import { PACES, asPace, randomIn } from '../core/pace';
 import {
   PROFILE_WAIT_MS,
@@ -120,7 +121,7 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
   const result = await repo.ingestPage({ ownerId, kind, requestCursor: info.cursor, page, now });
   await setHealth({ lastCaptureAt: now, lastParseError: null });
   if (result.committed?.events.length) {
-    await notifyEvents(result.committed.events);
+    await notifyEvents(withoutRepeats(result.committed.events, await repo.allEvents(ownerId)));
     await refreshBadge(repo);
   }
   return { handled: true, kind, status: result.status, reason: result.reason, collected: result.collected, expected };
@@ -236,7 +237,7 @@ export default defineBackground(() => {
           enqueue(async () => {
             const r = await repo.resolveReview(msg.scanId, msg.accept);
             if (r?.events.length) {
-              await notifyEvents(r.events);
+              await notifyEvents(withoutRepeats(r.events, await repo.allEvents(r.events[0].ownerId)));
               await refreshBadge(repo);
             }
             return { ok: true };

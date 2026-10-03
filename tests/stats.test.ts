@@ -87,9 +87,12 @@ describe('followerChanges: mutual events count as follower changes, once', () =>
     const days = dailyChanges([ev('LOST_MUTUAL', '1', now - 1 * 86_400_000), ev('LOST_FOLLOWER', '1', now)], 3, now);
     expect(days.map((d) => d.lost)).toEqual([0, 1, 0]);
   });
-  it('counts different users, and the same user again after 3 days, separately', () => {
+  it('counts different users, and the same user again after they came back, separately', () => {
     expect(kinds([ev('LOST_MUTUAL', '1', 0), ev('LOST_MUTUAL', '2', H)])).toEqual(['loss:1', 'loss:2']);
-    expect(kinds([ev('LOST_FOLLOWER', '1', 0), ev('LOST_FOLLOWER', '1', 10 * 24 * H)])).toEqual(['loss:1', 'loss:1']);
+    expect(kinds([ev('LOST_FOLLOWER', '1', 0), ev('NEW_FOLLOWER', '1', 24 * H), ev('LOST_FOLLOWER', '1', 48 * H)])).toEqual(['loss:1', 'gain:1', 'loss:1']);
+  });
+  it('treats a late report from the other list as the same departure, however late', () => {
+    expect(kinds([ev('LOST_FOLLOWER', '1', 0), ev('LOST_MUTUAL', '1', 10 * 24 * H)])).toEqual(['loss:1']);
   });
   it('ignores events that are not follower changes', () => {
     expect(kinds([ev('NEW_FOLLOWING', '1', 0), ev('UNFOLLOWED_BY_ME', '2', 0), ev('RENAME', '3', 0)])).toEqual([]);

@@ -4,6 +4,7 @@
   import { repo } from '../../ui/repo';
   import { countSeries, dailyChanges, delta, listGap, totals } from '../../ui/stats';
   import { eventLabel, timeAgo } from '../../ui/format';
+  import { withoutRepeats } from '../../core/follows';
   import StatTile from '../../ui/StatTile.svelte';
   import LineChart from '../../ui/LineChart.svelte';
   import DivergingBars from '../../ui/DivergingBars.svelte';
@@ -44,7 +45,7 @@
       followersDelta: delta(followerSeries, WEEK, now),
       followingDelta: delta(followingSeries, WEEK, now),
       days: dailyChanges(d.events, range, now),
-      departures: d.events.filter((e) => e.type === 'LOST_FOLLOWER' || e.type === 'LOST_MUTUAL').slice(0, 8),
+      departures: withoutRepeats(d.events.filter((e) => e.type === 'LOST_FOLLOWER' || e.type === 'LOST_MUTUAL'), d.events).slice(0, 8),
       lastScan: d.scans.find((s) => s.status === 'committed'),
       followersGap: listGap(d.scans.find((s) => s.kind === 'followers' && s.status === 'committed')),
       review: d.scans.filter((s) => s.status === 'needs_review').length,
