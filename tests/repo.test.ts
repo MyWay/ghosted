@@ -44,12 +44,37 @@ describe('repo scans', () => {
     expect(await repo.listMembers(OWNER, 'followers')).toHaveLength(10);
   });
 
-  it('second scan emits unfollower and new follower events', async () => {
+  it('reports an unfollower once a second scan also misses them', async () => {
     await scan('followers', mkUsers(1, 10));
+    const first = await scan('followers', [...mkUsers(1, 8), ...mkUsers(11, 11)]);
+    expect(first.committed!.events.map((e) => `${e.type}:${e.userId}`)).toEqual(['NEW_FOLLOWER:11']);
+    expect(await repo.listMembers(OWNER, 'followers')).toHaveLength(11);
     const r = await scan('followers', [...mkUsers(1, 8), ...mkUsers(11, 11)]);
     const types = r.committed!.events.map((e) => `${e.type}:${e.userId}`).sort();
-    expect(types).toEqual(['LOST_FOLLOWER:10', 'LOST_FOLLOWER:9', 'NEW_FOLLOWER:11']);
+    expect(types).toEqual(['LOST_FOLLOWER:10', 'LOST_FOLLOWER:9']);
     expect((await repo.recentEvents(OWNER)).length).toBe(3);
+    expect(await repo.listMembers(OWNER, 'followers')).toHaveLength(9);
+  });
+
+  it('someone X skipped once is not reported when they are back next scan', async () => {
+    await scan('followers', mkUsers(1, 10));
+    await scan('followers', mkUsers(1, 9));
+    const r = await scan('followers', mkUsers(1, 10));
+    expect(r.committed!.events).toEqual([]);
+    expect((await repo.listMembers(OWNER, 'followers')).filter((m) => m.missing)).toEqual([]);
+  });
+
+  it('an unavailable entry is not a departure', async () => {
+    await scan('followers', mkUsers(1, 3));
+    for (let i = 0; i < 2; i++) {
+      clock += 60_000;
+      await repo.setProfileCounts(OWNER, 3, undefined, clock);
+      const page = { ...toPage(mkUsers(1, 2), 'end|1'), unavailable: 1, unavailableIds: ['3'] };
+      await repo.ingestPage({ ownerId: OWNER, kind: 'followers', page, now: clock });
+      const r = await repo.ingestPage({ ownerId: OWNER, kind: 'followers', requestCursor: 'end|1', page: toPage([]), now: clock });
+      expect(r.committed!.events).toEqual([]);
+    }
+    expect(await repo.listMembers(OWNER, 'followers')).toHaveLength(3);
   });
 
   it('records a rename instead of an unfollow', async () => {
@@ -118,7 +143,9 @@ describe('repo scans', () => {
   it('flags a follower who also vanished from following as likely_gone', async () => {
     await scan('followers', mkUsers(1, 4));
     await scan('following', mkUsers(1, 4));
-    await scan('following', mkUsers(1, 3)); // user 4 vanished from following
+    await scan('following', mkUsers(1, 3)); // user 4 vanished from following...
+    await scan('following', mkUsers(1, 3)); // ...confirmed
+    await scan('followers', mkUsers(1, 3));
     const r = await scan('followers', mkUsers(1, 3));
     expect(r.committed!.events).toMatchObject([{ type: 'LOST_FOLLOWER', userId: '4', reason: 'likely_gone' }]);
   });
@@ -160,7 +187,8 @@ describe('repo scans', () => {
     await scan('followers', mkUsers(1, 199)); // newer, normal
     expect((await repo.db.scans.get(held.scanId!))?.status).toBe('rejected');
     expect(await repo.resolveReview(held.scanId!, true, clock + 1)).toBeNull();
-    expect(await repo.listMembers(OWNER, 'followers')).toHaveLength(199);
+    const members = await repo.listMembers(OWNER, 'followers');
+    expect(members.filter((m) => !m.missing)).toHaveLength(199);
   });
 
   it('a new held scan supersedes an older held one', async () => {
@@ -176,7 +204,9 @@ describe('repo scans', () => {
     await scan('followers', mkUsers(1, 4));
     await scan('following', mkUsers(1, 4));
     await scan('followers', mkUsers(1, 3)); // 4 left followers first
+    await scan('followers', mkUsers(1, 3));
     await scan('following', mkUsers(1, 3)); // ...and vanished from following too
+    await scan('following', mkUsers(1, 3));
     const lost = (await repo.allEvents(OWNER)).find((e) => e.type === 'LOST_FOLLOWER')!;
     expect(lost.reason).toBe('likely_gone');
   });
@@ -187,6 +217,7 @@ describe('repo scans', () => {
     await repo.recordMyUnfollow(OWNER, '4', clock);
     const f = await scan('following', mkUsers(1, 3));
     expect(f.committed!.events).toMatchObject([{ type: 'UNFOLLOWED_BY_ME', userId: '4', reason: 'by_me' }]);
+    await scan('followers', mkUsers(1, 3));
     const r = await scan('followers', mkUsers(1, 3));
     expect(r.committed!.events).toMatchObject([{ type: 'LOST_FOLLOWER', userId: '4', reason: 'unfollowed' }]);
   });

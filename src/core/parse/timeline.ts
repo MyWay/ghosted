@@ -66,7 +66,11 @@ export function parseTimelinePage(body: unknown): ParsedPage | null {
     const item = isObj(content.itemContent) ? content.itemContent : {};
     const results = isObj(item.user_results) ? item.user_results : {};
     const parsed = parseUserResult(results.result);
-    if (parsed.kind === 'unavailable') page.unavailable++;
+    if (parsed.kind === 'unavailable') {
+      page.unavailable++;
+      const id = /^user-(\d+)$/.exec(entryId)?.[1];
+      if (id) (page.unavailableIds ??= []).push(id);
+    }
     else if (parsed.kind === 'invalid') page.warnings++;
     else if (!seen.has(parsed.user.id)) {
       seen.add(parsed.user.id);

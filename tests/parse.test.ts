@@ -52,6 +52,7 @@ describe('parseTimelinePage', () => {
     expect(page.users).toHaveLength(1);
     expect(page.warnings).toBe(1);
     expect(page.unavailable).toBe(1);
+    expect(page.unavailableIds).toEqual(['8']);
   });
   it('reads a cursor delivered via TimelineReplaceEntry', () => {
     const body = timelineBody(mkUsers(1, 1), null);

@@ -209,7 +209,18 @@ export class Repo {
       const goneHint = new Set(recentGone.map((e) => e.userId));
       const myUnfollows = await this.myUnfollows(ownerId, now);
 
-      const diff = diffScan({ kind, prev, next, knownHandles, isBaseline: baseline, goneHint, myUnfollows });
+      const unavailable = new Set(scan.state.unavailableIds ?? []);
+      const diff = diffScan({
+        kind,
+        prev,
+        next,
+        knownHandles,
+        isBaseline: baseline,
+        goneHint,
+        myUnfollows,
+        unavailable,
+        confirmNow: force,
+      });
 
       // Without a fresh profile count the scan's completeness is unverified: be stricter.
       const strict = scan.expected === undefined;

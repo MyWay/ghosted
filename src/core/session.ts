@@ -19,6 +19,8 @@ export interface SessionState {
   collected: number;
   warnings: number;
   unavailable: number;
+  /** Ids of unavailable entries: still on the list, just not shown. Absent in older states. */
+  unavailableIds?: string[];
   gap: boolean;
   endReached: boolean;
 }
@@ -44,6 +46,7 @@ export const DEFAULT_THRESHOLD = 0.9;
 
 const isTerminalCursor = (c: string | undefined) => !c || c.startsWith('0|');
 const add = (list: string[], v: string | undefined) => (v && !list.includes(v) ? [...list, v] : list);
+const addAll = (list: string[] = [], vs: string[] = []) => vs.reduce(add, list);
 
 function emptyState(input: PageInput): SessionState {
   return {
@@ -84,6 +87,7 @@ export function applyPage(state: SessionState | null, input: PageInput): Session
     lastPageAt: input.now,
     collected: input.collectedTotal,
     topCursors: add(base.topCursors, page.topCursor),
+    unavailableIds: addAll(base.unavailableIds, page.unavailableIds),
   };
 
   if (!fresh && requestCursor && (base.topCursors.includes(requestCursor) || base.requestedCursors.includes(requestCursor))) {

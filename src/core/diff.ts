@@ -12,19 +12,25 @@ export interface DiffInput {
   goneHint?: Set<string>;
   /** Ids the owner was seen unfollowing on x.com recently. */
   myUnfollows?: Set<string>;
+  /** Ids X listed as unavailable in this scan: still on the list, so never a departure. */
+  unavailable?: Set<string>;
+  /** Report every missing member now instead of waiting for a second miss (an accepted review). */
+  confirmNow?: boolean;
 }
 
 export interface DiffResult {
   events: DiffEvent[];
   members: MemberRow[];
+  /** Members missing from this scan, whether reported now or held for the next one. */
   removed: number;
 }
 
 export function diffScan(input: DiffInput): DiffResult {
-  const { kind, prev, next, knownHandles, isBaseline, goneHint, myUnfollows } = input;
+  const { kind, prev, next, knownHandles, isBaseline, goneHint, myUnfollows, unavailable, confirmNow } = input;
   const events: DiffEvent[] = [];
   const prevById = new Map(prev.map((m) => [m.userId, m]));
   const nextById = new Map(next.map((u) => [u.id, u]));
+  const kept: MemberRow[] = [];
 
   for (const u of next) {
     const known = knownHandles.get(u.id);
@@ -36,8 +42,19 @@ export function diffScan(input: DiffInput): DiffResult {
   let removed = 0;
   for (const m of prev) {
     if (nextById.has(m.userId)) continue;
+    if (unavailable?.has(m.userId)) {
+      const { missing: _, ...row } = m;
+      kept.push(row);
+      continue;
+    }
     removed++;
     if (isBaseline) continue;
+    const byMe = kind === 'following' && !!myUnfollows?.has(m.userId);
+    // X's lists sometimes skip people: hold a first miss until the next scan confirms it.
+    if (!m.missing && !byMe && !confirmNow) {
+      kept.push({ ...m, missing: true });
+      continue;
+    }
     if (kind === 'followers') {
       events.push({
         type: 'LOST_FOLLOWER',
@@ -46,12 +63,7 @@ export function diffScan(input: DiffInput): DiffResult {
         reason: goneHint?.has(m.userId) ? 'likely_gone' : 'unfollowed',
       });
     } else {
-      events.push({
-        type: 'UNFOLLOWED_BY_ME',
-        userId: m.userId,
-        handle: m.handle,
-        reason: myUnfollows?.has(m.userId) ? 'by_me' : 'unknown',
-      });
+      events.push({ type: 'UNFOLLOWED_BY_ME', userId: m.userId, handle: m.handle, reason: byMe ? 'by_me' : 'unknown' });
     }
   }
 
@@ -74,5 +86,5 @@ export function diffScan(input: DiffInput): DiffResult {
     handle: u.handle,
     ...(kind === 'following' && u.followsYou !== undefined ? { followsYou: u.followsYou } : {}),
   }));
-  return { events, members, removed };
+  return { events, members: [...members, ...kept], removed };
 }

@@ -25,6 +25,8 @@ export interface ParsedPage {
   warnings: number;
   /** Entries X reported as unavailable (suspended / deleted). */
   unavailable: number;
+  /** Ids of the unavailable entries, when X's entry id carried one. */
+  unavailableIds?: string[];
 }
 
 export type EventType =
@@ -56,4 +58,9 @@ export interface MemberRow {
   userId: string;
   handle: string;
   followsYou?: boolean;
+  /**
+   * Missing from the last committed scan. X's lists sometimes skip people, so a departure is only
+   * reported when the next scan misses them too.
+   */
+  missing?: boolean;
 }
