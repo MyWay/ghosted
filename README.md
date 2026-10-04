@@ -46,6 +46,19 @@ Tip: pin Ghosted to your toolbar (puzzle-piece icon → pin) so you can see the 
 **Why is nothing showing after my first check?**
 The first check is the starting point. Changes appear from the second check on.
 
+**It says someone unfollowed me, but their profile says they follow me.**
+Ghosted counts someone as gone when they are missing from your followers list during a check.
+Two things can cause this:
+- They unfollowed and followed you again. X's Notifications tab will show "followed you" from them.
+- X left them out of the list it loaded, so the alert is wrong. X's lists are often a little
+  shorter than your follower count and can vary from one load to the next. If they still follow
+  you right after the check and X shows no new "followed you" from them, this is what happened.
+  Dashboard → Scans shows how many accounts each check collected ("N of ~M collected"); a few
+  short of your follower count is normal and is where such gaps come from.
+
+Either way, your next check lists them as a new follower again. New-follower alerts are off by
+default, so look in the Timeline, or turn them on in Settings.
+
 **Does it check automatically?**
 No. It only sees your lists when you run a check, so the browser must be open. You get a daily
 reminder.
