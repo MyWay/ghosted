@@ -14,6 +14,18 @@ const payload = (): WebhookPayload =>
     now: NOW,
   });
 
+describe('summarize', () => {
+  it('never mentions people who did not leave: non-departure events notify nothing', () => {
+    const notADeparture = [ev('RENAME', '1', 'a'), ev('NEW_FOLLOWING', '2', 'b'), ev('UNFOLLOWED_BY_ME', '3', 'c'), ev('NEW_MUTUAL', '4', 'd')];
+    expect(summarize(notADeparture, { browser: true, newFollowers: true })).toBeNull();
+    expect(summarize([ev('NEW_FOLLOWER', '5', 'e')], { browser: true, newFollowers: false })).toBeNull();
+  });
+  it('keeps likely_gone out of the "unfollowed you" line', () => {
+    const s = summarize([ev('LOST_FOLLOWER', '1', 'a', 'unfollowed'), ev('LOST_FOLLOWER', '2', 'b', 'likely_gone')], { browser: true, newFollowers: false })!;
+    expect(s.lines).toEqual(['1 unfollowed you: @a', '1 left (unfollowed or suspended/deleted): @b']);
+  });
+});
+
 describe('webhookOrigin', () => {
   it('asks for the host only, on any port', () => {
     expect(webhookOrigin('https://hooks.example.com:8443/x?y=1')).toEqual({ origin: 'https://hooks.example.com/*' });

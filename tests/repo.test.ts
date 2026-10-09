@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { PROFILE_FRESH_MS, Repo } from '../src/db/repo';
 import { AppDB } from '../src/db/schema';
+import { DEFAULT_PREFS, summarize } from '../src/notify/format';
 import type { ListKind, ParsedPage } from '../src/core/types';
 import { mkUsers, type FakeUser } from './helpers';
 
@@ -62,6 +63,25 @@ describe('repo scans', () => {
     const r = await scan('followers', mkUsers(1, 10));
     expect(r.committed!.events).toEqual([]);
     expect((await repo.listMembers(OWNER, 'followers')).filter((m) => m.missing)).toEqual([]);
+  });
+
+  it('strangers after the baseline are new followers at most: no unfollow is claimed or notified', async () => {
+    await scan('followers', mkUsers(1, 3));
+    // user 1 stays; X skipped 2 and 3 (held, not departures); 10 and 11 were never in the circle.
+    const r = await scan('followers', [mkUsers(1, 1)[0], ...mkUsers(10, 11)]);
+    expect(r.committed!.events.map((e) => `${e.type}:${e.userId}`).sort()).toEqual(['NEW_FOLLOWER:10', 'NEW_FOLLOWER:11']);
+    // None of that is worth a notification with the default prefs.
+    expect(summarize(r.committed!.events, DEFAULT_PREFS)).toBeNull();
+  });
+
+  it('committing a scan twice records nothing the second time', async () => {
+    await scan('followers', mkUsers(1, 10));
+    await scan('followers', mkUsers(1, 9)); // first miss of 10: held
+    const r = await scan('followers', mkUsers(1, 9)); // confirmed: LOST_FOLLOWER:10
+    expect(r.committed!.events.map((e) => `${e.type}:${e.userId}`)).toEqual(['LOST_FOLLOWER:10']);
+    const before = (await repo.allEvents(OWNER)).length;
+    expect(await repo.commitScan(r.committed!.scanId, { now: clock })).toBeNull();
+    expect((await repo.allEvents(OWNER)).length).toBe(before);
   });
 
   it('an unavailable entry is not a departure', async () => {

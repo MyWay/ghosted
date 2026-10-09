@@ -32,6 +32,13 @@ describe('diffScan followers', () => {
     expect(types(r)).toEqual(['LOST_FOLLOWER:1']);
     expect(r.members).toEqual([]);
   });
+  it('a stranger in the next scan is a new follower at most, never an unfollower', () => {
+    const r = diffScan({ kind: 'followers', prev: [m('1'), m('2')], next: [u('3')], knownHandles: empty, isBaseline: false });
+    expect(types(r)).toEqual(['NEW_FOLLOWER:3']);
+    expect(r.removed).toBe(2);
+    // The two previous members are held for the next scan, not reported as departures.
+    expect(r.members.filter((x) => x.missing).map((x) => x.userId).sort()).toEqual(['1', '2']);
+  });
   it('never reports someone X listed as unavailable, and keeps them as a member', () => {
     const r = diffScan({
       kind: 'followers',
