@@ -52,6 +52,8 @@ export interface BridgeReadyReply {
 /** Background -> the check's tab, when the profile checks are over. */
 export interface ChecksDone {
   type: 'checks-done';
+  /** X limited requests, so the checks stopped early. */
+  rateLimited?: boolean;
 }
 
 export interface ScanFinishedReply {

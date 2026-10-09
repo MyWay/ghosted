@@ -128,9 +128,11 @@ export class Overlay {
   }
 
   /** The profile checks are over: the whole check is. */
-  checksDone() {
-    this.text.textContent = 'Check complete. You can close this tab.';
-    this.bar.style.width = '100%';
+  checksDone(rateLimited = false) {
+    this.text.textContent = rateLimited
+      ? 'X is limiting requests, so the profile checks stopped. The rest are checked next time. You can close this tab.'
+      : 'Check complete. You can close this tab.';
+    if (!rateLimited) this.bar.style.width = '100%';
     this.pauseBtn.remove();
     this.stopBtn.textContent = 'Close';
     this.stopBtn.onclick = () => this.host.remove();

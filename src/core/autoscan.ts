@@ -1,3 +1,5 @@
+import { parseApiErrors } from './parse/timeline';
+import { parseUserResult, profileResult } from './parse/user';
 import type { ListKind } from './types';
 
 /** A follower missing from two scans, whose profile the check visits before reporting them. */
@@ -112,4 +114,19 @@ export function afterCheck(s: AutoScan | undefined, userId: string, now: number,
   if (!s || s.phase !== 'verify' || s.queue?.[0]?.userId !== userId) return null;
   const eventIds = eventId === undefined ? (s.eventIds ?? []) : [...(s.eventIds ?? []), eventId];
   return { ...s, queue: s.queue.slice(1), eventIds, startedAt: now };
+}
+
+/** What a profile check found: still follows you, does not, or no answer. */
+export type CheckOutcome = 'follows' | 'left' | 'unknown';
+
+/**
+ * Read a captured profile response during the checks: X limiting requests, the answer for
+ * `userId`, or null when it is not about that profile (another account, or no user in it).
+ */
+export function readProfile(status: number, body: unknown, userId: string): CheckOutcome | 'rate-limited' | null {
+  if (status === 429 || status === 403 || parseApiErrors(body)?.rateLimited) return 'rate-limited';
+  const parsed = parseUserResult(profileResult(body));
+  if (parsed.kind !== 'ok' || parsed.user.id !== userId) return null;
+  const follows = parsed.user.followsYou;
+  return follows === true ? 'follows' : follows === false ? 'left' : 'unknown';
 }

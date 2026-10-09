@@ -26,6 +26,8 @@ export interface DiffInput {
   verify?: boolean;
   /** Followers: the list came up shorter than X's count (or the count is unknown). */
   short?: boolean;
+  /** Followers already held for a profile check: a check without profile visits leaves them held. */
+  held?: Set<string>;
   now?: number;
 }
 
@@ -39,7 +41,7 @@ export interface DiffResult {
 }
 
 export function diffScan(input: DiffInput): DiffResult {
-  const { kind, prev, next, knownHandles, isBaseline, goneHint, myUnfollows, unavailable, confirmNow, verify, short, now = 0 } = input;
+  const { kind, prev, next, knownHandles, isBaseline, goneHint, myUnfollows, unavailable, confirmNow, verify, short, held, now = 0 } = input;
   const events: DiffEvent[] = [];
   const prevById = new Map(prev.map((m) => [m.userId, m]));
   const nextById = new Map(next.map((u) => [u.id, u]));
@@ -77,7 +79,7 @@ export function diffScan(input: DiffInput): DiffResult {
           kept.push({ ...m, missing: true });
           continue;
         }
-        if (verify) {
+        if (verify || held?.has(m.userId)) {
           const row = { ...m, missing: true };
           kept.push(row);
           toVerify.push(row);

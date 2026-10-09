@@ -2,13 +2,13 @@ import { browser } from 'wxt/browser';
 import { ownerIdFromTwid } from '../core/owner';
 import { isUnfollowUrl, opToKind, parseOperationUrl, parseUnfollow } from '../core/parse/operations';
 import { parseApiErrors, parseTimelinePage } from '../core/parse/timeline';
-import { numericPaths, parseProfile, parseUserResult, profileResult } from '../core/parse/user';
+import { numericPaths, parseProfile, profileResult } from '../core/parse/user';
 import type { ListKind } from '../core/types';
-import { Repo, migrateLegacyDb, type CheckOutcome } from '../db/repo';
+import { Repo, migrateLegacyDb } from '../db/repo';
+import { ProfileChecks } from '../checks';
 import type {
   BridgeReadyReply,
   CaptureReply,
-  ChecksDone,
   CommandReply,
   ScanFinishedReply,
   ToBackground,
@@ -19,21 +19,39 @@ import { findBoomerangs, withoutRepeats } from '../core/follows';
 import type { EventRow } from '../db/schema';
 import { PACES, asPace, randomIn } from '../core/pace';
 import {
-  CHECK_WAIT_MS,
-  MAX_CHECKS,
   PROFILE_WAIT_MS,
   advanceToList,
-  afterCheck,
   afterKindDone,
   answerBridgeReady,
   newAutoScan,
-  startChecks,
   stepOf,
   urlFor,
   type AutoScan,
 } from '../core/autoscan';
 
 const repo = new Repo();
+
+const RATE_LIMITED_TEXT =
+  'X is limiting requests, so the check stopped. Try again in about 15 minutes, or choose a slower check speed in Settings.';
+
+const checks = new ProfileChecks({
+  repo,
+  now: () => Date.now(),
+  load: () => getAutoScan(),
+  save: (scan) => (scan ? browser.storage.session.set({ autoscan: scan }) : browser.storage.session.remove('autoscan')),
+  open: (tabId, url) => browser.tabs.update(tabId, { url }).then(() => {}, () => {}),
+  later: (fn, ms) => void setTimeout(() => void enqueue(fn), ms),
+  pause: async () => randomIn(PACES[asPace(await repo.getSetting('pace', undefined))].checkWaitMs),
+  notify: (ownerId, events) => {
+    void refreshBadge(repo).catch(() => {});
+    notifyCommitted(ownerId, events);
+  },
+  tell: (tabId, msg) => browser.tabs.sendMessage(tabId, msg).then(() => {}, () => {}),
+  rateLimited: async () => {
+    await setHealth({ lastRateLimitAt: Date.now() });
+    await sendBrowser('Ghosted', RATE_LIMITED_TEXT);
+  },
+});
 
 // Long enough for a slow check of a large account.
 const AUTOSCAN_TTL_MS = 3 * 60 * 60 * 1000;
@@ -85,7 +103,7 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
   if (!info) return { handled: false, ignored: 'irrelevant' };
 
   if (info.op === 'UserByScreenName') {
-    await checkCapturedProfile(msg.body, tabId);
+    await checks.onProfile(tabId, msg.status, msg.body);
     const profile = msg.body ? parseProfile(msg.body) : null;
     if (profile && profile.id === ownerId) {
       await repo.setProfileCounts(ownerId, profile.followersCount, profile.followingCount, now);
@@ -196,11 +214,8 @@ async function moveToList(tabId?: number, step?: number) {
 async function handleBridgeReady(msg: { path: string }, tabId: number | undefined): Promise<BridgeReadyReply> {
   const scan = await getAutoScan();
   const answer = answerBridgeReady(scan, tabId, msg.path);
-  // A profile that never answers (renamed, suspended, slow) is reported unchecked after a while.
-  if (answer.checking && scan?.queue?.[0]) {
-    const userId = scan.queue[0].userId;
-    setTimeout(() => void enqueue(() => finishCheck(userId, 'unknown')), CHECK_WAIT_MS);
-  }
+  // A profile that never answers (renamed, suspended, slow) counts as a check without an answer.
+  if (answer.checking && scan) checks.pageReady(scan);
   // If X never sends the profile count (cached, or the request changed), do not hang: carry on without it.
   // The timer only applies to this profile step; a later one has its own.
   if (answer.waitForProfile && scan) {
@@ -220,7 +235,6 @@ async function handleScanFinished(msg: Extract<ToBackground, { type: 'scan-finis
   if (!scan) return { ok: true };
   const aborted = msg.outcome === 'stopped' || msg.outcome === 'rate-limited' || msg.outcome === 'timeout';
   const next = aborted ? null : afterKindDone(scan, Date.now());
-  const ownerId = await repo.getSetting<string | undefined>('ownerId', undefined);
   if (next) {
     await browser.storage.session.set({ autoscan: next });
     // Small pause so two full scans are not back-to-back.
@@ -230,96 +244,16 @@ async function handleScanFinished(msg: Extract<ToBackground, { type: 'scan-finis
     else setTimeout(() => void openNextList(), wait);
     return { ok: true, next: { kind: next.kinds[0], inMs: wait } };
   }
-  if (!aborted && ownerId) {
+  if (!aborted) {
     // Lists done: visit the profiles of followers who seem to have left before reporting them.
-    const pending = await repo.pendingDepartures(ownerId);
-    const checks = startChecks(scan, pending, Date.now());
-    // More than one check can visit: report the rest unchecked now.
-    const overflow: EventRow[] = [];
-    for (const p of pending.slice(MAX_CHECKS)) {
-      const e = await repo.resolveDeparture(ownerId, p.userId, 'unknown', Date.now());
-      if (e) overflow.push(e);
-    }
-    if (overflow.length) {
-      await refreshBadge(repo);
-      notifyCommitted(ownerId, overflow);
-    }
-    if (checks) {
-      await browser.storage.session.set({ autoscan: checks });
-      const wait = randomIn(PACES[asPace(await repo.getSetting('pace', undefined))].checkWaitMs);
-      setTimeout(() => void openNextList(), wait);
-      return { ok: true, checks: checks.queue!.length };
-    }
+    const n = await checks.start(scan);
+    if (n) return { ok: true, checks: n };
   }
+  // Stopped: departures held for a profile check wait for the next check.
   await browser.storage.session.remove('autoscan');
-  // Stopped: profiles cannot be visited, so report the held departures unchecked.
-  if (aborted && ownerId) await reportUnchecked(ownerId, []);
   if (msg.outcome === 'rate-limited')
-    await sendBrowser('Ghosted', 'X is limiting requests, so the check stopped. Try again in about 15 minutes, or choose a slower check speed in Settings.');
+    await sendBrowser('Ghosted', RATE_LIMITED_TEXT);
   return { ok: true };
-}
-
-/** Held departures whose check never ran (browser closed, worker stopped) are reported unchecked. */
-async function expireStaleChecks() {
-  const ownerId = await repo.getSetting<string | undefined>('ownerId', undefined);
-  if (!ownerId) return;
-  const events = await repo.expirePending(ownerId, Date.now());
-  if (!events.length) return;
-  await refreshBadge(repo);
-  notifyCommitted(ownerId, events);
-}
-
-/** A captured profile is the one the check is visiting: apply what it says. */
-async function checkCapturedProfile(body: unknown, tabId?: number) {
-  const scan = await getAutoScan();
-  const head = scan?.phase === 'verify' && scan.tabId === tabId ? scan.queue?.[0] : undefined;
-  if (!head) return;
-  const parsed = parseUserResult(profileResult(body));
-  if (parsed.kind !== 'ok' || parsed.user.id !== head.userId) return;
-  const follows = parsed.user.followsYou;
-  await finishCheck(head.userId, follows === true ? 'follows' : follows === false ? 'left' : 'unknown');
-}
-
-/** Record one profile check (or its timeout) and open the next profile, or end the check. */
-async function finishCheck(userId: string, outcome: CheckOutcome) {
-  const now = Date.now();
-  const scan = await getAutoScan();
-  const ownerId = await repo.getSetting<string | undefined>('ownerId', undefined);
-  if (!scan || !ownerId || scan.queue?.[0]?.userId !== userId) return;
-  const event = await repo.resolveDeparture(ownerId, userId, outcome, now);
-  const next = afterCheck(scan, userId, now, event?.id);
-  if (!next) return;
-  if (event) await refreshBadge(repo);
-  if (next.queue?.length) {
-    await browser.storage.session.set({ autoscan: next });
-    const wait = randomIn(PACES[asPace(await repo.getSetting('pace', undefined))].checkWaitMs);
-    setTimeout(() => void openNextList(), wait);
-    return;
-  }
-  await endChecks(next, ownerId);
-}
-
-/** Profile checks over (or stopped): alert about the departures they recorded, in one batch. */
-async function endChecks(scan: AutoScan, ownerId: string) {
-  await browser.storage.session.remove('autoscan');
-  const recorded = (await repo.db.events.bulkGet(scan.eventIds ?? [])).filter((e): e is EventRow => !!e);
-  await reportUnchecked(ownerId, recorded);
-  const done: ChecksDone = { type: 'checks-done' };
-  await browser.tabs.sendMessage(scan.tabId, done).catch(() => {});
-}
-
-/** Report every held departure still unchecked, together with `recorded`. */
-async function reportUnchecked(ownerId: string, recorded: EventRow[]) {
-  const events = [...recorded, ...(await repo.expirePending(ownerId, Date.now(), true))];
-  if (!events.length) return;
-  await refreshBadge(repo);
-  notifyCommitted(ownerId, events);
-}
-
-async function stopChecks() {
-  const scan = await getAutoScan();
-  const ownerId = await repo.getSetting<string | undefined>('ownerId', undefined);
-  if (scan?.phase === 'verify' && ownerId) await endChecks(scan, ownerId);
 }
 
 async function openNextList() {
@@ -363,7 +297,7 @@ export default defineBackground(() => {
       case 'scan-finished':
         return respond(enqueue(() => handleScanFinished(msg)));
       case 'stop-checks':
-        return respond(enqueue(() => stopChecks()).then(() => ({ ok: true })));
+        return respond(enqueue(() => checks.stop()).then(() => ({ ok: true })));
       case 'start-scan':
         return respond(startScan(msg.kinds));
       case 'resolve-review':
@@ -394,7 +328,7 @@ export default defineBackground(() => {
   browser.alarms.create('scan-due', { periodInMinutes: 60 });
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'stale-sessions') void enqueue(() => repo.abandonStale(Date.now()));
-    if (alarm.name === 'stale-sessions') void enqueue(expireStaleChecks);
+    if (alarm.name === 'stale-sessions') void enqueue(() => checks.expire());
     if (alarm.name === 'scan-due') void checkScanDue();
     if (alarm.name === NEXT_LIST_ALARM) void openNextList();
   });

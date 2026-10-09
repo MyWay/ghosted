@@ -57,9 +57,11 @@ normal.
 X's Followers list also leaves out some followers on every load, so missing twice does not prove
 they left. Before reporting a follower as gone, the check opens their profile, which says whether
 they still follow you. If they do, nothing is reported, and they are checked again after a week if
-still missing. Up to 15 profiles per check; if a profile can't be checked (the check was stopped,
-or the account was renamed) and your list came up short, the alert says "no longer in your
-followers list (X may be hiding them)" instead of "unfollowed you".
+still missing. It visits up to 15 profiles per check, one at a time with a pause; the rest wait
+for your next check, as do all of them if X starts limiting requests or you press Stop. If a profile
+gives no answer on two checks, or nobody gets to check it within 3 days, the person is reported
+without a check: as "no longer in your followers list (X may be hiding them)" when your list came up
+short of your follower count, otherwise as "unfollowed you".
 
 **It says someone unfollowed me, but their profile says they follow me.**
 Most likely they unfollowed and followed you again between checks; X's Notifications tab will

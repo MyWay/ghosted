@@ -73,7 +73,8 @@ export default defineContentScript({
     };
 
     browser.runtime.onMessage.addListener((msg: unknown) => {
-      if ((msg as ChecksDone | null)?.type === 'checks-done') overlay?.checksDone();
+      const done = msg as ChecksDone | null;
+      if (done?.type === 'checks-done') overlay?.checksDone(done.rateLimited);
     });
 
     const init = async () => {

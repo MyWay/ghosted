@@ -1,5 +1,6 @@
 import { applyPage, evaluate, isStale, needsReview, DEFAULT_THRESHOLD, type SessionState } from '../core/session';
 import { diffScan } from '../core/diff';
+import type { CheckOutcome } from '../core/autoscan';
 import type { DiffEvent, ListKind, ParsedPage, UserRecord } from '../core/types';
 import Dexie from 'dexie';
 import { AppDB, LEGACY_DB_NAME, type EventRow, type MembershipRow, type ScanRow, type UserRow } from './schema';
@@ -10,21 +11,23 @@ const MY_UNFOLLOW_WINDOW_MS = 30 * DAY_MS;
 /** Profile counts older than this are not trusted as the expected list size. */
 export const PROFILE_FRESH_MS = 60 * 60 * 1000;
 const KEEP_DEBUG_SESSIONS = 3;
-/** A departure still waiting for its profile check after this is reported without one. */
-export const PENDING_MAX_MS = 30 * 60 * 1000;
+/** A departure still unchecked this long after it was first held is reported without a check. */
+export const PENDING_MAX_MS = 3 * DAY_MS;
+/** Profile checks that got no answer before the departure is reported without one. */
+export const MAX_CHECK_ATTEMPTS = 2;
 
 /** A follower missing from two scans, kept as a member until a profile check says whether they left. */
 export interface PendingDeparture {
   userId: string;
   handle: string;
   scanId: number;
+  /** When first held; kept while later scans keep missing them. */
   at: number;
-  /** The scan's list was shorter than X's count: X may be hiding them. */
+  /** The latest scan's list was shorter than X's count: X may be hiding them. */
   short: boolean;
+  /** Profile checks that got no answer. */
+  attempts: number;
 }
-
-/** What a profile check found: still follows you, does not, or no answer. */
-export type CheckOutcome = 'follows' | 'left' | 'unknown';
 
 export interface IngestInput {
   ownerId: string;
@@ -230,6 +233,7 @@ export class Repo {
 
       const unavailable = new Set(scan.state.unavailableIds ?? []);
       const short = scan.expected === undefined || scan.collected + (scan.state.unavailable ?? 0) < scan.expected;
+      const pending = kind === 'followers' ? await this.pendingDepartures(ownerId) : [];
       const diff = diffScan({
         kind,
         prev,
@@ -243,6 +247,7 @@ export class Repo {
         verify,
         short,
         now,
+        held: new Set(pending.map((p) => p.userId)),
       });
 
       // Without a fresh profile count the scan's completeness is unverified: be stricter.
@@ -263,11 +268,16 @@ export class Repo {
       eventRows.forEach((e, i) => (e.id = ids[i] as number));
 
       if (kind === 'following') await this.relabelGoneFollowers(ownerId, diff.events, now);
-      if (diff.toVerify.length) {
-        const held = new Set(diff.toVerify.map((m) => m.userId));
-        const pending = (await this.pendingDepartures(ownerId)).filter((p) => !held.has(p.userId));
-        const added = diff.toVerify.map((m) => ({ userId: m.userId, handle: m.handle, scanId, at: now, short }));
-        await this.setSetting(`pendingDepartures:${ownerId}`, [...pending, ...added]);
+      if (kind === 'followers') {
+        // Still held, or back on the list (dropped). A re-held departure keeps its age and attempts.
+        const missing = new Set(diff.members.filter((m) => m.missing).map((m) => m.userId));
+        const kept = pending.filter((p) => missing.has(p.userId));
+        const known = new Map(kept.map((p) => [p.userId, p]));
+        const merged = kept.map((p) => ({ ...p, short }));
+        for (const m of diff.toVerify) {
+          if (!known.has(m.userId)) merged.push({ userId: m.userId, handle: m.handle, scanId, at: now, short, attempts: 0 });
+        }
+        await this.setSetting(`pendingDepartures:${ownerId}`, merged);
       }
 
       await this.db.scans.update(scanId, { status: 'committed', endedAt: now, reason: undefined });
@@ -279,25 +289,37 @@ export class Repo {
 
   // ---- profile checks -------------------------------------------------
 
+  /** Held departures, longest held first: the order the profile checks visit them. */
   async pendingDepartures(ownerId: string): Promise<PendingDeparture[]> {
-    return this.getSetting<PendingDeparture[]>(`pendingDepartures:${ownerId}`, []);
+    const list = await this.getSetting<PendingDeparture[]>(`pendingDepartures:${ownerId}`, []);
+    return list.map((p) => ({ ...p, attempts: p.attempts ?? 0 })).sort((a, b) => a.at - b.at);
   }
 
   /**
    * Apply a profile check of a held departure. Still follows: they stay a member X hides from the
-   * list. Otherwise the departure is recorded; with no answer, as `unconfirmed` when the list was
-   * short. Returns the recorded event, or null.
+   * list. Not following: an unfollow is recorded. No answer: they stay held for the next check,
+   * unless that was the last attempt or they have waited too long; then the departure is recorded
+   * without a check, as `unconfirmed` when the list was short. Returns the recorded event, or null.
    */
   async resolveDeparture(ownerId: string, userId: string, outcome: CheckOutcome, now: number): Promise<EventRow | null> {
     return this.db.transaction('rw', [this.db.settings, this.db.membership, this.db.events], async () => {
       const pending = await this.pendingDepartures(ownerId);
       const p = pending.find((d) => d.userId === userId);
       if (!p) return null;
-      await this.setSetting(`pendingDepartures:${ownerId}`, pending.filter((d) => d !== p));
+      const rest = pending.filter((d) => d !== p);
       const key: [string, string, string] = [ownerId, 'followers', userId];
       const row = await this.db.membership.get(key);
       // Back in a newer scan: nothing to report.
-      if (!row?.missing) return null;
+      if (!row?.missing) {
+        await this.setSetting(`pendingDepartures:${ownerId}`, rest);
+        return null;
+      }
+      const attempts = outcome === 'unknown' ? p.attempts + 1 : p.attempts;
+      if (outcome === 'unknown' && attempts < MAX_CHECK_ATTEMPTS && now - p.at < PENDING_MAX_MS) {
+        await this.setSetting(`pendingDepartures:${ownerId}`, [...rest, { ...p, attempts }]);
+        return null;
+      }
+      await this.setSetting(`pendingDepartures:${ownerId}`, rest);
       if (outcome === 'follows') {
         await this.db.membership.update(key, { checkedAt: now });
         return null;
@@ -310,11 +332,11 @@ export class Repo {
     });
   }
 
-  /** Report held departures whose profile check never happened (check stopped, browser closed). */
-  async expirePending(ownerId: string, now: number, all = false): Promise<EventRow[]> {
+  /** Report held departures still unchecked after PENDING_MAX_MS (no assisted check ran in time). */
+  async expirePending(ownerId: string, now: number): Promise<EventRow[]> {
     const events: EventRow[] = [];
     for (const p of await this.pendingDepartures(ownerId)) {
-      if (!all && now - p.at < PENDING_MAX_MS) continue;
+      if (now - p.at < PENDING_MAX_MS) continue;
       const e = await this.resolveDeparture(ownerId, p.userId, 'unknown', now);
       if (e) events.push(e);
     }
