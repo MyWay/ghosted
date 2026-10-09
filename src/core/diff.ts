@@ -1,5 +1,8 @@
 import type { DiffEvent, ListKind, MemberRow, UserRecord } from './types';
 
+/** A follower a profile check showed still follows you is not checked again before this. */
+export const RECHECK_MS = 7 * 24 * 60 * 60 * 1000;
+
 export interface DiffInput {
   kind: ListKind;
   prev: MemberRow[];
@@ -16,6 +19,14 @@ export interface DiffInput {
   unavailable?: Set<string>;
   /** Report every missing member now instead of waiting for a second miss (an accepted review). */
   confirmNow?: boolean;
+  /**
+   * Followers: hold confirmed departures in `toVerify` for a profile check instead of reporting
+   * them, because X's Followers list leaves some followers out on every load.
+   */
+  verify?: boolean;
+  /** Followers: the list came up shorter than X's count (or the count is unknown). */
+  short?: boolean;
+  now?: number;
 }
 
 export interface DiffResult {
@@ -23,14 +34,17 @@ export interface DiffResult {
   members: MemberRow[];
   /** Members missing from this scan, whether reported now or held for the next one. */
   removed: number;
+  /** Followers missing twice, kept as members until a profile check says whether they left. */
+  toVerify: MemberRow[];
 }
 
 export function diffScan(input: DiffInput): DiffResult {
-  const { kind, prev, next, knownHandles, isBaseline, goneHint, myUnfollows, unavailable, confirmNow } = input;
+  const { kind, prev, next, knownHandles, isBaseline, goneHint, myUnfollows, unavailable, confirmNow, verify, short, now = 0 } = input;
   const events: DiffEvent[] = [];
   const prevById = new Map(prev.map((m) => [m.userId, m]));
   const nextById = new Map(next.map((u) => [u.id, u]));
   const kept: MemberRow[] = [];
+  const toVerify: MemberRow[] = [];
 
   for (const u of next) {
     const known = knownHandles.get(u.id);
@@ -56,11 +70,25 @@ export function diffScan(input: DiffInput): DiffResult {
       continue;
     }
     if (kind === 'followers') {
+      const gone = goneHint?.has(m.userId);
+      if (!gone && !confirmNow) {
+        // Their profile said they still follow you: X hides them from the list, not a departure.
+        if (m.checkedAt && now - m.checkedAt < RECHECK_MS) {
+          kept.push({ ...m, missing: true });
+          continue;
+        }
+        if (verify) {
+          const row = { ...m, missing: true };
+          kept.push(row);
+          toVerify.push(row);
+          continue;
+        }
+      }
       events.push({
         type: 'LOST_FOLLOWER',
         userId: m.userId,
         handle: m.handle,
-        reason: goneHint?.has(m.userId) ? 'likely_gone' : 'unfollowed',
+        reason: gone ? 'likely_gone' : short ? 'unconfirmed' : 'unfollowed',
       });
     } else {
       events.push({ type: 'UNFOLLOWED_BY_ME', userId: m.userId, handle: m.handle, reason: byMe ? 'by_me' : 'unknown' });
@@ -86,5 +114,5 @@ export function diffScan(input: DiffInput): DiffResult {
     handle: u.handle,
     ...(kind === 'following' && u.followsYou !== undefined ? { followsYou: u.followsYou } : {}),
   }));
-  return { events, members: [...members, ...kept], removed };
+  return { events, members: [...members, ...kept], removed, toVerify };
 }

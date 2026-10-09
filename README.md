@@ -53,6 +53,14 @@ someone missed once and back on the next check is never reported. Dashboard → 
 many accounts each check collected ("N of ~M collected"); a few short of your follower count is
 normal.
 
+**Why does the check open other people's profiles at the end?**
+X's Followers list also leaves out some followers on every load, so missing twice does not prove
+they left. Before reporting a follower as gone, the check opens their profile, which says whether
+they still follow you. If they do, nothing is reported, and they are checked again after a week if
+still missing. Up to 15 profiles per check; if a profile can't be checked (the check was stopped,
+or the account was renamed) and your list came up short, the alert says "no longer in your
+followers list (X may be hiding them)" instead of "unfollowed you".
+
 **It says someone unfollowed me, but their profile says they follow me.**
 Most likely they unfollowed and followed you again between checks; X's Notifications tab will
 show "followed you" from them. Your next check lists them as a new follower again. New-follower
@@ -64,7 +72,7 @@ reminder.
 
 **Can X ban me for this?**
 The risk is low, but not zero. Ghosted never sends its own requests to X; it only reads the lists
-X loads while you (or its auto-scroll) browse them. If X slows you down, Ghosted stops and you can
+and profiles X loads while you (or its auto-scroll) browse them. If X slows you down, Ghosted stops and you can
 try again later. X's terms restrict automated tools, so use it at your own risk.
 
 **Why isn't it in the Chrome Web Store?**

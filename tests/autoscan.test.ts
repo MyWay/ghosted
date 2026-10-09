@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceToList, afterKindDone, answerBridgeReady, newAutoScan, stepOf, urlFor } from '../src/core/autoscan';
+import { MAX_CHECKS, advanceToList, afterCheck, afterKindDone, answerBridgeReady, newAutoScan, startChecks, stepOf, urlFor } from '../src/core/autoscan';
 
 const scan = () => newAutoScan(7, ['following', 'followers'], 'maya', 1000);
 
@@ -70,5 +70,35 @@ describe('stepOf', () => {
     expect(stepOf(newAutoScan(7, ['followers'], 'maya', 0))).toEqual({ index: 1, total: 1 });
     const { total: _, ...old } = scan();
     expect(stepOf(old)).toEqual({ index: 1, total: 2 });
+  });
+});
+
+describe('profile checks after the lists', () => {
+  const lists = () => advanceToList(newAutoScan(7, ['followers'], 'maya', 1000), 7, 2000)!;
+  const people = [{ userId: '1', handle: 'ann' }, { userId: '2', handle: 'bob' }];
+
+  it('visits each profile in turn, then ends', () => {
+    expect(startChecks(lists(), [], 3000)).toBeNull();
+    const s = startChecks(lists(), people, 3000)!;
+    expect(s).toMatchObject({ phase: 'verify', queueTotal: 2, eventIds: [] });
+    expect(urlFor(s)).toBe('https://x.com/ann');
+    expect(answerBridgeReady(s, 7, '/ann')).toEqual({ autoscroll: null, waitForProfile: false, checking: { handle: 'ann', index: 1, total: 2 } });
+    expect(answerBridgeReady(s, 7, '/bob').checking).toBeUndefined();
+    expect(answerBridgeReady(s, 8, '/ann').checking).toBeUndefined();
+    const next = afterCheck(s, '1', 4000, 42)!;
+    expect(urlFor(next)).toBe('https://x.com/bob');
+    expect(answerBridgeReady(next, 7, '/bob').checking).toEqual({ handle: 'bob', index: 2, total: 2 });
+    expect(afterCheck(next, '2', 5000)).toMatchObject({ queue: [], eventIds: [42] });
+  });
+
+  it('a late timer for a profile already checked does nothing', () => {
+    const s = afterCheck(startChecks(lists(), people, 3000)!, '1', 4000)!;
+    expect(afterCheck(s, '1', 5000)).toBeNull();
+    expect(afterCheck(undefined, '1', 5000)).toBeNull();
+  });
+
+  it('visits at most MAX_CHECKS profiles', () => {
+    const many = Array.from({ length: MAX_CHECKS + 5 }, (_, i) => ({ userId: String(i), handle: `p${i}` }));
+    expect(startChecks(lists(), many, 3000)!.queue).toHaveLength(MAX_CHECKS);
   });
 });

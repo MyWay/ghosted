@@ -1,7 +1,15 @@
 import { browser } from 'wxt/browser';
 import { handleFromProfileHref } from '../core/owner';
 import type { ListKind } from '../core/types';
-import { CHANNEL, type BridgeReadyReply, type CaptureReply, type PageCapture, type ScanFinishedReply, type ToBackground } from '../messages';
+import {
+  CHANNEL,
+  type BridgeReadyReply,
+  type CaptureReply,
+  type ChecksDone,
+  type PageCapture,
+  type ScanFinishedReply,
+  type ToBackground,
+} from '../messages';
 import { AutoScroller } from '../bridge/autoscroll';
 import { PACES, asPace, type Pace } from '../core/pace';
 import { Overlay } from '../bridge/overlay';
@@ -56,7 +64,7 @@ export default defineContentScript({
           // Ask first: the panel must say whether another list follows before it says anything final.
           const reply = await send<ScanFinishedReply>({ type: 'scan-finished', kind, outcome });
           const baseline = lastReply?.kind === kind && lastReply.baseline === true;
-          overlay?.done(outcome, { kind, next: reply?.next, baseline });
+          overlay?.done(outcome, { kind, next: reply?.next, baseline, checks: reply?.checks });
         },
       }, PACES[pace]);
       overlay.onPause = (paused) => scroller?.setPaused(paused);
@@ -64,10 +72,19 @@ export default defineContentScript({
       scroller.start(lastReply);
     };
 
+    browser.runtime.onMessage.addListener((msg: unknown) => {
+      if ((msg as ChecksDone | null)?.type === 'checks-done') overlay?.checksDone();
+    });
+
     const init = async () => {
       reportHandle();
       const reply = await send<BridgeReadyReply>({ type: 'bridge-ready', path: location.pathname });
       if (reply?.autoscroll) void start(reply.autoscroll, asPace(reply.pace), reply.step);
+      else if (reply?.checking) {
+        overlay = new Overlay();
+        overlay.checking(reply.checking);
+        overlay.onStop = () => void send({ type: 'stop-checks' });
+      }
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void init());
     else void init();

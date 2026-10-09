@@ -10,6 +10,21 @@ const MY_UNFOLLOW_WINDOW_MS = 30 * DAY_MS;
 /** Profile counts older than this are not trusted as the expected list size. */
 export const PROFILE_FRESH_MS = 60 * 60 * 1000;
 const KEEP_DEBUG_SESSIONS = 3;
+/** A departure still waiting for its profile check after this is reported without one. */
+export const PENDING_MAX_MS = 30 * 60 * 1000;
+
+/** A follower missing from two scans, kept as a member until a profile check says whether they left. */
+export interface PendingDeparture {
+  userId: string;
+  handle: string;
+  scanId: number;
+  at: number;
+  /** The scan's list was shorter than X's count: X may be hiding them. */
+  short: boolean;
+}
+
+/** What a profile check found: still follows you, does not, or no answer. */
+export type CheckOutcome = 'follows' | 'left' | 'unknown';
 
 export interface IngestInput {
   ownerId: string;
@@ -17,12 +32,16 @@ export interface IngestInput {
   requestCursor?: string;
   page: ParsedPage;
   now: number;
+  /** Hold confirmed follower departures for a profile check (an assisted check can visit profiles). */
+  verify?: boolean;
 }
 
 export interface CommitResult {
   scanId: number;
   baseline: boolean;
   events: EventRow[];
+  /** Departures held for a profile check. */
+  toVerify: number;
 }
 
 export interface IngestResult {
@@ -125,7 +144,7 @@ export class Repo {
       await this.finalizeScan(scan, 'invalid', verdict.reason, now);
       return { ...base, status: 'invalid', reason: verdict.reason };
     }
-    const committed = await this.commitScan(result.scanId, { now });
+    const committed = await this.commitScan(result.scanId, { now, verify: input.verify });
     const finalScan = (await this.db.scans.get(result.scanId))!;
     return { ...base, status: finalScan.status, committed: committed ?? undefined };
   }
@@ -181,8 +200,8 @@ export class Repo {
    * Diff a complete scan against current membership and apply it. Idempotent: a committed scan
    * returns null. A suspicious number of removals parks the scan as `needs_review`.
    */
-  async commitScan(scanId: number, opts: { now: number; force?: boolean }): Promise<CommitResult | null> {
-    const { now, force = false } = opts;
+  async commitScan(scanId: number, opts: { now: number; force?: boolean; verify?: boolean }): Promise<CommitResult | null> {
+    const { now, force = false, verify = false } = opts;
     return this.db.transaction('rw', this.db.tables, async () => {
       const scan = await this.db.scans.get(scanId);
       if (!scan || scan.status === 'committed' || scan.status === 'rejected') return null;
@@ -210,6 +229,7 @@ export class Repo {
       const myUnfollows = await this.myUnfollows(ownerId, now);
 
       const unavailable = new Set(scan.state.unavailableIds ?? []);
+      const short = scan.expected === undefined || scan.collected + (scan.state.unavailable ?? 0) < scan.expected;
       const diff = diffScan({
         kind,
         prev,
@@ -220,6 +240,9 @@ export class Repo {
         myUnfollows,
         unavailable,
         confirmNow: force,
+        verify,
+        short,
+        now,
       });
 
       // Without a fresh profile count the scan's completeness is unverified: be stricter.
@@ -240,12 +263,62 @@ export class Repo {
       eventRows.forEach((e, i) => (e.id = ids[i] as number));
 
       if (kind === 'following') await this.relabelGoneFollowers(ownerId, diff.events, now);
+      if (diff.toVerify.length) {
+        const held = new Set(diff.toVerify.map((m) => m.userId));
+        const pending = (await this.pendingDepartures(ownerId)).filter((p) => !held.has(p.userId));
+        const added = diff.toVerify.map((m) => ({ userId: m.userId, handle: m.handle, scanId, at: now, short }));
+        await this.setSetting(`pendingDepartures:${ownerId}`, [...pending, ...added]);
+      }
 
       await this.db.scans.update(scanId, { status: 'committed', endedAt: now, reason: undefined });
       await this.db.scanItems.where('scanId').equals(scanId).delete();
       await this.supersedeHeld(ownerId, kind, scan.startedAt, now);
-      return { scanId, baseline, events: eventRows };
+      return { scanId, baseline, events: eventRows, toVerify: diff.toVerify.length };
     });
+  }
+
+  // ---- profile checks -------------------------------------------------
+
+  async pendingDepartures(ownerId: string): Promise<PendingDeparture[]> {
+    return this.getSetting<PendingDeparture[]>(`pendingDepartures:${ownerId}`, []);
+  }
+
+  /**
+   * Apply a profile check of a held departure. Still follows: they stay a member X hides from the
+   * list. Otherwise the departure is recorded; with no answer, as `unconfirmed` when the list was
+   * short. Returns the recorded event, or null.
+   */
+  async resolveDeparture(ownerId: string, userId: string, outcome: CheckOutcome, now: number): Promise<EventRow | null> {
+    return this.db.transaction('rw', [this.db.settings, this.db.membership, this.db.events], async () => {
+      const pending = await this.pendingDepartures(ownerId);
+      const p = pending.find((d) => d.userId === userId);
+      if (!p) return null;
+      await this.setSetting(`pendingDepartures:${ownerId}`, pending.filter((d) => d !== p));
+      const key: [string, string, string] = [ownerId, 'followers', userId];
+      const row = await this.db.membership.get(key);
+      // Back in a newer scan: nothing to report.
+      if (!row?.missing) return null;
+      if (outcome === 'follows') {
+        await this.db.membership.update(key, { checkedAt: now });
+        return null;
+      }
+      await this.db.membership.delete(key);
+      const reason = outcome === 'unknown' && p.short ? 'unconfirmed' : 'unfollowed';
+      const event: EventRow = { ownerId, scanId: p.scanId, at: now, type: 'LOST_FOLLOWER', userId, handle: row.handle, reason };
+      event.id = (await this.db.events.add(event)) as number;
+      return event;
+    });
+  }
+
+  /** Report held departures whose profile check never happened (check stopped, browser closed). */
+  async expirePending(ownerId: string, now: number, all = false): Promise<EventRow[]> {
+    const events: EventRow[] = [];
+    for (const p of await this.pendingDepartures(ownerId)) {
+      if (!all && now - p.at < PENDING_MAX_MS) continue;
+      const e = await this.resolveDeparture(ownerId, p.userId, 'unknown', now);
+      if (e) events.push(e);
+    }
+    return events;
   }
 
   /**
@@ -258,7 +331,7 @@ export class Repo {
     await this.db.events
       .where('[ownerId+type]')
       .equals([ownerId, 'LOST_FOLLOWER'])
-      .filter((e) => vanished.has(e.userId) && e.reason === 'unfollowed' && now - e.at < GONE_WINDOW_MS)
+      .filter((e) => vanished.has(e.userId) && (e.reason === 'unfollowed' || e.reason === 'unconfirmed') && now - e.at < GONE_WINDOW_MS)
       .modify({ reason: 'likely_gone' });
   }
 

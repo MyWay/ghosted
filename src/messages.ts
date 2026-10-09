@@ -20,6 +20,7 @@ export type ToBackground =
   | { type: 'bridge-ready'; path: string }
   | { type: 'owner-handle'; handle: string }
   | { type: 'scan-finished'; kind: ListKind; outcome: 'complete' | 'invalid' | 'stopped' | 'timeout' | 'rate-limited' }
+  | { type: 'stop-checks' }
   // popup / dashboard -> background
   | { type: 'start-scan'; kinds: ListKind[] }
   | { type: 'resolve-review'; scanId: number; accept: boolean }
@@ -44,12 +45,21 @@ export interface BridgeReadyReply {
   pace?: Pace;
   /** Position of this list in the check, for "1 of 2". */
   step?: { index: number; total: number };
+  /** This page is the profile of a follower who seems to have left, visited to check. */
+  checking?: { handle: string; index: number; total: number };
+}
+
+/** Background -> the check's tab, when the profile checks are over. */
+export interface ChecksDone {
+  type: 'checks-done';
 }
 
 export interface ScanFinishedReply {
   ok: boolean;
   /** The list the check moves on to, and roughly when its page opens. */
   next?: { kind: ListKind; inMs: number };
+  /** Profiles of followers who seem to have left, which the check visits next. */
+  checks?: number;
 }
 
 export interface CommandReply {

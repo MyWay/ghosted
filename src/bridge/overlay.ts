@@ -9,7 +9,11 @@ export interface DoneInfo {
   next?: { kind: ListKind; inMs: number };
   /** This list's first-ever check: it saved a starting point, so there are no changes yet. */
   baseline?: boolean;
+  /** Profiles the check visits next, of followers who seem to have left. */
+  checks?: number;
 }
+
+const people = (n: number) => (n === 1 ? '1 follower' : `${n} followers`);
 
 /**
  * Panel text when a list ends. While another list follows it must not sound finished: people
@@ -21,6 +25,13 @@ export function doneText(outcome: Outcome, info: DoneInfo): { text: string; keep
     const first =
       outcome === 'complete' ? `${list} list done.` : `${list} list could not be verified as complete; nothing was changed for it.`;
     return { text: `${first} Keep this tab open: the ${info.next.kind} list is next.`, keepOpen: true };
+  }
+  if (info.checks && (outcome === 'complete' || outcome === 'invalid')) {
+    const first = outcome === 'complete' ? `${list} list done.` : `${list} list could not be verified as complete; nothing was changed for it.`;
+    return {
+      text: `${first} Keep this tab open: checking the profiles of ${people(info.checks)} missing from your list, to see if they really left.`,
+      keepOpen: true,
+    };
   }
   switch (outcome) {
     case 'complete':
@@ -108,11 +119,34 @@ export class Overlay {
     if (p.expected) this.bar.style.width = `${Math.min(100, Math.round((p.collected / p.expected) * 100))}%`;
   }
 
+  /** On a follower's profile the check is visiting. */
+  checking(c: { handle: string; index: number; total: number }) {
+    this.title.textContent = 'Ghosted · checking profiles';
+    this.text.textContent = `Does @${c.handle} still follow you? (${c.index} of ${c.total})`;
+    this.bar.style.width = `${Math.round(((c.index - 1) / c.total) * 100)}%`;
+    this.pauseBtn.remove();
+  }
+
+  /** The profile checks are over: the whole check is. */
+  checksDone() {
+    this.text.textContent = 'Check complete. You can close this tab.';
+    this.bar.style.width = '100%';
+    this.pauseBtn.remove();
+    this.stopBtn.textContent = 'Close';
+    this.stopBtn.onclick = () => this.host.remove();
+    setTimeout(() => this.host.remove(), 15_000);
+  }
+
   done(outcome: Outcome, info: DoneInfo) {
     const { text, keepOpen } = doneText(outcome, info);
     this.text.textContent = text;
     this.pauseBtn.remove();
     if (outcome === 'complete') this.bar.style.width = '100%';
+    if (keepOpen && info.checks) {
+      // The panel goes away by itself when the tab opens the first profile.
+      this.stopBtn.remove();
+      return;
+    }
     if (keepOpen && info.next) {
       // The panel goes away by itself when the tab moves on to the next list.
       this.stopBtn.remove();

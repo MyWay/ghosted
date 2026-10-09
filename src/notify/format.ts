@@ -30,14 +30,16 @@ function names(events: EventRow[]): string {
 export function summarize(events: EventRow[], prefs: NotifyPrefs): { title: string; lines: string[] } | null {
   const by = (t: EventRow['type']) => events.filter((e) => e.type === t);
   const lost = by('LOST_FOLLOWER');
-  const unfollowed = lost.filter((e) => e.reason !== 'likely_gone');
+  const unfollowed = lost.filter((e) => e.reason !== 'likely_gone' && e.reason !== 'unconfirmed');
   const gone = lost.filter((e) => e.reason === 'likely_gone');
+  const unconfirmed = lost.filter((e) => e.reason === 'unconfirmed');
   const lostMutual = by('LOST_MUTUAL');
   const fresh = prefs.newFollowers ? by('NEW_FOLLOWER') : [];
 
   const lines: string[] = [];
   if (unfollowed.length) lines.push(`${unfollowed.length} unfollowed you: ${names(unfollowed)}`);
   if (gone.length) lines.push(`${gone.length} left (unfollowed or suspended/deleted): ${names(gone)}`);
+  if (unconfirmed.length) lines.push(`${unconfirmed.length} no longer in your followers list (X may be hiding them): ${names(unconfirmed)}`);
   if (lostMutual.length) lines.push(`${lostMutual.length} you follow stopped following back: ${names(lostMutual)}`);
   if (fresh.length) lines.push(`${fresh.length} new follower${fresh.length === 1 ? '' : 's'}: ${names(fresh)}`);
   if (!lines.length) return null;

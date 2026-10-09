@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diffScan } from '../src/core/diff';
+import { RECHECK_MS, diffScan } from '../src/core/diff';
 import type { MemberRow, UserRecord } from '../src/core/types';
 
 const u = (id: string, handle = `h${id}`, extra: Partial<UserRecord> = {}): UserRecord => ({ id, handle, name: handle, ...extra });
@@ -113,5 +113,39 @@ describe('diffScan: why someone left your following', () => {
     const r = diffScan({ kind: 'following', prev: [m('1'), missed('2')], next: [], knownHandles: empty, isBaseline: false, myUnfollows: new Set(['1']) });
     expect(r.events.find((e) => e.userId === '1')?.reason).toBe('by_me');
     expect(r.events.find((e) => e.userId === '2')?.reason).toBe('unknown');
+  });
+});
+
+describe('diffScan: followers X hides from the list', () => {
+  const base = { kind: 'followers' as const, knownHandles: empty, isBaseline: false, now: RECHECK_MS * 10 };
+  it('holds a second miss for a profile check when verify is on', () => {
+    const r = diffScan({ ...base, prev: [missed('1'), m('2')], next: [u('2')], verify: true });
+    expect(r.events).toEqual([]);
+    expect(r.toVerify.map((x) => x.userId)).toEqual(['1']);
+    expect(r.members.find((x) => x.userId === '1')).toMatchObject({ missing: true });
+  });
+  it('keeps a recently checked follower silently, checks one again once the check is stale', () => {
+    const fresh = { ...missed('1'), checkedAt: base.now - 1000 };
+    const r = diffScan({ ...base, prev: [fresh], next: [], verify: true });
+    expect(r.events).toEqual([]);
+    expect(r.toVerify).toEqual([]);
+    expect(r.members).toEqual([fresh]);
+    // Without verify (a manual check) too: their profile said they follow you.
+    expect(diffScan({ ...base, prev: [fresh], next: [] }).events).toEqual([]);
+    const stale = { ...missed('1'), checkedAt: base.now - RECHECK_MS - 1 };
+    expect(diffScan({ ...base, prev: [stale], next: [], verify: true }).toVerify.map((x) => x.userId)).toEqual(['1']);
+  });
+  it('without a check, a departure from a short list is unconfirmed, from a full one unfollowed', () => {
+    expect(diffScan({ ...base, prev: [missed('1')], next: [], short: true }).events[0].reason).toBe('unconfirmed');
+    expect(diffScan({ ...base, prev: [missed('1')], next: [], short: false }).events[0].reason).toBe('unfollowed');
+  });
+  it('a likely suspended follower is reported, not checked', () => {
+    const r = diffScan({ ...base, prev: [missed('1')], next: [], verify: true, goneHint: new Set(['1']) });
+    expect(r.events[0]).toMatchObject({ type: 'LOST_FOLLOWER', reason: 'likely_gone' });
+    expect(r.toVerify).toEqual([]);
+  });
+  it('someone hidden by X who shows up again loses the check mark', () => {
+    const r = diffScan({ ...base, prev: [{ ...missed('1'), checkedAt: base.now }], next: [u('1')], verify: true });
+    expect(r.members).toEqual([{ userId: '1', handle: 'h1' }]);
   });
 });

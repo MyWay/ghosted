@@ -16,7 +16,8 @@ export function eventLabel(e: EventRow): string {
     case 'NEW_FOLLOWER':
       return 'followed you';
     case 'LOST_FOLLOWER':
-      return e.reason === 'likely_gone' ? 'left (unfollowed, or suspended/deleted)' : 'unfollowed you';
+      if (e.reason === 'likely_gone') return 'left (unfollowed, or suspended/deleted)';
+      return e.reason === 'unconfirmed' ? 'no longer in your followers list (X may be hiding them)' : 'unfollowed you';
     case 'NEW_FOLLOWING':
       return 'you followed';
     case 'UNFOLLOWED_BY_ME':

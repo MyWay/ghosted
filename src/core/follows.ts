@@ -52,7 +52,7 @@ export interface Boomerang {
   userId: string;
   /** Handle from the newest event. */
   handle: string;
-  /** Times they followed you and then left (suspensions excluded). */
+  /** Times they followed you and then left (suspensions and unconfirmed departures excluded). */
   cycles: number;
   lastLeftAt: number;
   /** Their follower changes, oldest first. */
@@ -63,7 +63,8 @@ export const MIN_CYCLES = 2;
 
 /**
  * People who unfollowed you at least `minCycles` times, most cycles first. A departure labeled
- * "likely gone" (suspended / deleted) is not a choice to unfollow and does not count.
+ * "likely gone" (suspended / deleted) is not a choice to unfollow and does not count, nor is an
+ * unconfirmed one (X may only be hiding them from the list).
  */
 export function findBoomerangs(events: FollowEvent[], minCycles = MIN_CYCLES): Boomerang[] {
   const byUser = new Map<string, Boomerang>();
@@ -73,7 +74,7 @@ export function findBoomerangs(events: FollowEvent[], minCycles = MIN_CYCLES): B
     if (!u) byUser.set(e.userId, (u = { userId: e.userId, handle: e.handle, cycles: 0, lastLeftAt: 0, history: [] }));
     u.handle = e.handle;
     u.history.push({ at: e.at, change });
-    if (change === 'loss' && e.reason !== 'likely_gone') {
+    if (change === 'loss' && e.reason !== 'likely_gone' && e.reason !== 'unconfirmed') {
       u.cycles++;
       u.lastLeftAt = e.at;
     }

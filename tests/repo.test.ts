@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { PROFILE_FRESH_MS, Repo } from '../src/db/repo';
+import { PENDING_MAX_MS, PROFILE_FRESH_MS, Repo } from '../src/db/repo';
 import { AppDB } from '../src/db/schema';
 import { DEFAULT_PREFS, summarize } from '../src/notify/format';
 import type { ListKind, ParsedPage } from '../src/core/types';
@@ -301,5 +301,81 @@ describe('diagnostics', () => {
     const info = await buildDiagnostics(repo, undefined, { version: '1.0.0', userAgent: 'x' });
     expect(info.latestScans).toEqual([]);
     expect(info.saved).toBeNull();
+  });
+});
+
+describe('profile checks of departed followers', () => {
+  /** A followers scan where X's count is `count` (default: the list size) and the check can visit profiles. */
+  async function check(users: FakeUser[], count = users.length, verify = true) {
+    clock += 60_000;
+    await repo.setProfileCounts(OWNER, count, undefined, clock);
+    const first = await repo.ingestPage({ ownerId: OWNER, kind: 'followers', page: toPage(users, 'end|1'), now: clock, verify });
+    if (first.status !== 'collecting') return first;
+    return repo.ingestPage({ ownerId: OWNER, kind: 'followers', requestCursor: 'end|1', page: toPage([]), now: clock, verify });
+  }
+  const member = async (id: string) => (await repo.listMembers(OWNER, 'followers')).find((m) => m.userId === id);
+
+  it('a follower X hides from the list but whose profile says they follow you is never reported', async () => {
+    await check(mkUsers(1, 10));
+    await check(mkUsers(1, 9), 10);
+    const r = await check(mkUsers(1, 9), 10);
+    expect(r.committed).toMatchObject({ events: [], toVerify: 1 });
+    expect((await repo.pendingDepartures(OWNER)).map((p) => p.userId)).toEqual(['10']);
+    expect(await repo.resolveDeparture(OWNER, '10', 'follows', clock)).toBeNull();
+    expect(await repo.pendingDepartures(OWNER)).toEqual([]);
+    expect(await member('10')).toMatchObject({ missing: true, checkedAt: clock });
+    // Still hidden on later checks: no event, no new profile visit.
+    const later = await check(mkUsers(1, 9), 10);
+    expect(later.committed).toMatchObject({ events: [], toVerify: 0 });
+    expect(await repo.recentEvents(OWNER)).toEqual([]);
+  });
+
+  it('a profile that says they no longer follow you records an unfollow', async () => {
+    await check(mkUsers(1, 10));
+    await check(mkUsers(1, 9), 10);
+    await check(mkUsers(1, 9), 10);
+    const e = await repo.resolveDeparture(OWNER, '10', 'left', clock);
+    expect(e).toMatchObject({ type: 'LOST_FOLLOWER', userId: '10', reason: 'unfollowed' });
+    expect(await member('10')).toBeUndefined();
+    expect(summarize([e!], DEFAULT_PREFS)!.lines).toEqual(['1 unfollowed you: @user10']);
+  });
+
+  it('no answer from the profile: unconfirmed when the list was short, unfollowed when it was full', async () => {
+    await check(mkUsers(1, 10));
+    await check(mkUsers(1, 9), 10);
+    await check(mkUsers(1, 9), 10);
+    const e = await repo.resolveDeparture(OWNER, '10', 'unknown', clock);
+    expect(e?.reason).toBe('unconfirmed');
+    expect(summarize([e!], DEFAULT_PREFS)!.lines).toEqual(['1 no longer in your followers list (X may be hiding them): @user10']);
+    // A full list (X's count matches) but no answer: they did leave the list X says is complete.
+    await check(mkUsers(1, 8), 8);
+    await check(mkUsers(1, 8), 8);
+    expect((await repo.resolveDeparture(OWNER, '9', 'unknown', clock))?.reason).toBe('unfollowed');
+  });
+
+  it('a manual check (no profile visits) reports a short list departure as unconfirmed', async () => {
+    await check(mkUsers(1, 10), 10, false);
+    await check(mkUsers(1, 9), 10, false);
+    const r = await check(mkUsers(1, 9), 10, false);
+    expect(r.committed!.events.map((e) => [e.userId, e.reason])).toEqual([['10', 'unconfirmed']]);
+  });
+
+  it('someone back in a newer scan before the check is not reported', async () => {
+    await check(mkUsers(1, 10));
+    await check(mkUsers(1, 9), 10);
+    await check(mkUsers(1, 9), 10);
+    await check(mkUsers(1, 10));
+    expect(await repo.resolveDeparture(OWNER, '10', 'left', clock)).toBeNull();
+    expect(await member('10')).toMatchObject({ userId: '10' });
+  });
+
+  it('a check that never ran is reported unchecked after a while', async () => {
+    await check(mkUsers(1, 10));
+    await check(mkUsers(1, 9), 10);
+    await check(mkUsers(1, 9), 10);
+    expect(await repo.expirePending(OWNER, clock + 60_000)).toEqual([]);
+    const events = await repo.expirePending(OWNER, clock + PENDING_MAX_MS);
+    expect(events.map((e) => [e.userId, e.reason])).toEqual([['10', 'unconfirmed']]);
+    expect(await repo.pendingDepartures(OWNER)).toEqual([]);
   });
 });

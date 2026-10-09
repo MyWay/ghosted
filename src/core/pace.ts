@@ -10,12 +10,14 @@ export interface PaceConfig {
   pageWaitMs: [number, number];
   /** Random pause between the following and followers lists, in ms. */
   betweenListsMs: [number, number];
+  /** Random pause before each follower profile a check visits, in ms. */
+  checkWaitMs: [number, number];
 }
 
 export const PACES: Record<Pace, PaceConfig> = {
-  normal: { pageWaitMs: [350, 900], betweenListsMs: [4_000, 8_000] },
-  careful: { pageWaitMs: [1_500, 3_000], betweenListsMs: [30_000, 45_000] },
-  slow: { pageWaitMs: [4_000, 7_000], betweenListsMs: [60_000, 90_000] },
+  normal: { pageWaitMs: [350, 900], betweenListsMs: [4_000, 8_000], checkWaitMs: [1_500, 3_000] },
+  careful: { pageWaitMs: [1_500, 3_000], betweenListsMs: [30_000, 45_000], checkWaitMs: [4_000, 7_000] },
+  slow: { pageWaitMs: [4_000, 7_000], betweenListsMs: [60_000, 90_000], checkWaitMs: [8_000, 12_000] },
 };
 
 export const DEFAULT_PACE: Pace = 'normal';

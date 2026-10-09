@@ -45,14 +45,15 @@ export interface DiffEvent {
   /** Only for RENAME. */
   previousHandle?: string;
   /**
-   * LOST_FOLLOWER: 'unfollowed' (default) or 'likely_gone' (suspended / deactivated).
+   * LOST_FOLLOWER: 'unfollowed' (default), 'likely_gone' (suspended / deactivated) or 'unconfirmed'
+   * (missing from a list X kept short, and their profile could not be checked: X may be hiding them).
    * UNFOLLOWED_BY_ME: 'by_me' (seen you unfollow on x.com) or 'unknown' (other device, or the
    * account was suspended / deleted).
    */
   reason?: EventReason;
 }
 
-export type EventReason = 'unfollowed' | 'likely_gone' | 'by_me' | 'unknown';
+export type EventReason = 'unfollowed' | 'likely_gone' | 'unconfirmed' | 'by_me' | 'unknown';
 
 export interface MemberRow {
   userId: string;
@@ -63,4 +64,10 @@ export interface MemberRow {
    * reported when the next scan misses them too.
    */
   missing?: boolean;
+  /**
+   * Followers only: when a profile check last showed this missing member still follows you. X's
+   * Followers list leaves some followers out on every load; they are not reported again until
+   * this check goes stale.
+   */
+  checkedAt?: number;
 }

@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { countdown, doneText } from '../src/bridge/overlay';
 
 describe('doneText', () => {
+  it('keeps the tab open while profile checks follow', () => {
+    const r = doneText('complete', { kind: 'followers', checks: 2 });
+    expect(r.keepOpen).toBe(true);
+    expect(r.text).toMatch(/Keep this tab open: checking the profiles of 2 followers/);
+    expect(doneText('stopped', { kind: 'followers', checks: 2 }).keepOpen).toBe(false);
+  });
   const next = { kind: 'followers' as const, inMs: 40_000 };
 
   it('never sounds finished while another list follows', () => {

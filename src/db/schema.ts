@@ -48,6 +48,7 @@ export interface MembershipRow {
   handle: string;
   followsYou?: boolean;
   missing?: boolean;
+  checkedAt?: number;
 }
 
 export interface EventRow {
