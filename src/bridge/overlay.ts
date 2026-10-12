@@ -37,7 +37,7 @@ export function doneText(outcome: Outcome, info: DoneInfo): { text: string; keep
     case 'complete':
       return {
         text: info.baseline
-          ? 'Check complete. This first check saved your starting point: changes show from your next check. You can close this tab.'
+          ? 'Check complete. This first check saved your starting point: changes show from your next check (unfollows take two in a row, to be sure). You can close this tab.'
           : 'Check complete. You can close this tab.',
         keepOpen: false,
       };

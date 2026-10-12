@@ -138,7 +138,7 @@
       {:else if s.baselineDone}
         <div class="card allset">
           <strong class="good">All set</strong>
-          <p class="muted">Tracking {s.t.followers.toLocaleString()} followers and {s.t.following.toLocaleString()} following. Changes show up here after your next check.</p>
+          <p class="muted">Tracking {s.t.followers.toLocaleString()} followers and {s.t.following.toLocaleString()} following. New followers show up after your next check; unfollows need two checks in a row to confirm.</p>
         </div>
       {:else}
         <div class="card allset">

@@ -37,14 +37,15 @@ A setup page opens when the install finishes. Follow its three steps.
 3. Leave the X tab open and visible until it says **Check complete**.
 
 The first check records who follows you today. From the next check on, Ghosted shows who
-left and who joined. Check once a day; Ghosted reminds you.
+joined; someone who left shows up once two checks in a row miss them. Check once a day; Ghosted reminds you.
 
 Tip: pin Ghosted to your toolbar (puzzle-piece icon → pin) so you can see the red number.
 
 ## FAQ
 
 **Why is nothing showing after my first check?**
-The first check is the starting point. Changes appear from the second check on.
+The first check is the starting point. New followers appear from the second check on, and
+unfollows from the third, since an unfollow needs two checks in a row to miss the person.
 
 **Why was an unfollow reported a check later than it happened?**
 X's lists sometimes leave out a few people who still follow you, and they can differ from one

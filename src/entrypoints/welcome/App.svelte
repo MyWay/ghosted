@@ -93,7 +93,7 @@
       <div class="grow">
         <h3>Run your first check</h3>
         {#if scanned}
-          <p class="muted">Done. From now on, every check is compared with the previous one.</p>
+          <p class="muted">Done. From now on, every check is compared with the previous one. New followers show up on your next check; an unfollow takes one more.</p>
         {:else}
           <p class="muted">
             Opens your following, then followers list and scrolls them for you. Keep that tab visible until the panel says
@@ -110,6 +110,7 @@
   <section class="card tips">
     <h3>Good to know</h3>
     <ul class="muted">
+      <li>An unfollow is reported once two checks in a row miss that person, so it can take a couple of checks to appear. X's lists sometimes skip people who still follow you, and this avoids false alarms.</li>
       <li>Nothing updates on its own: press <em>Check now</em> in the popup, or click the daily reminder.</li>
       <li>Scrolling your own followers page to the bottom also counts as a check.</li>
       <li>Want alerts on your phone? Add Telegram or Discord in Settings.</li>
