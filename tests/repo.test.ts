@@ -241,6 +241,16 @@ describe('repo scans', () => {
     const r = await scan('followers', mkUsers(1, 3));
     expect(r.committed!.events).toMatchObject([{ type: 'LOST_FOLLOWER', userId: '4', reason: 'unfollowed' }]);
   });
+
+  it('someone you followed again is no longer your unfollow: a single miss is held', async () => {
+    await scan('following', mkUsers(1, 4));
+    await repo.recordMyUnfollow(OWNER, '4', clock);
+    await scan('following', mkUsers(1, 3));
+    await scan('following', mkUsers(1, 4)); // followed again
+    const r = await scan('following', mkUsers(1, 3)); // X skips them once
+    expect(r.committed!.events).toEqual([]);
+    expect((await repo.listMembers(OWNER, 'following')).find((m) => m.userId === '4')).toMatchObject({ missing: true });
+  });
 });
 
 import { migrateLegacyDb } from '../src/db/repo';

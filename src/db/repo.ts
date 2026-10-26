@@ -92,6 +92,18 @@ export class Repo {
     await this.setSetting(key, { ...pruned, [userId]: now });
   }
 
+  /**
+   * Forget unfollows of people back in a following scan started after them: you followed them
+   * again, so a later miss is not yours. Re-follows themselves are not captured.
+   */
+  private async clearMyUnfollows(ownerId: string, followed: UserRecord[], startedAt: number): Promise<void> {
+    const key = `myUnfollows:${ownerId}`;
+    const map = await this.getSetting<Record<string, number>>(key, {});
+    const ids = new Set(followed.map((u) => u.id));
+    const rest = Object.fromEntries(Object.entries(map).filter(([id, at]) => !(ids.has(id) && at < startedAt)));
+    if (Object.keys(rest).length !== Object.keys(map).length) await this.setSetting(key, rest);
+  }
+
   private async myUnfollows(ownerId: string, now: number): Promise<Set<string>> {
     const map = await this.getSetting<Record<string, number>>(`myUnfollows:${ownerId}`, {});
     return new Set(Object.entries(map).filter(([, at]) => now - at < MY_UNFOLLOW_WINDOW_MS).map(([id]) => id));
@@ -267,7 +279,10 @@ export class Repo {
       const ids = await this.db.events.bulkAdd(eventRows, { allKeys: true });
       eventRows.forEach((e, i) => (e.id = ids[i] as number));
 
-      if (kind === 'following') await this.relabelGoneFollowers(ownerId, diff.events, now);
+      if (kind === 'following') {
+        await this.relabelGoneFollowers(ownerId, diff.events, now);
+        await this.clearMyUnfollows(ownerId, next, scan.startedAt);
+      }
       if (kind === 'followers') {
         // Still held, or back on the list (dropped). A re-held departure keeps its age and attempts.
         const missing = new Set(diff.members.filter((m) => m.missing).map((m) => m.userId));

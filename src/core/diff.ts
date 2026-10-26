@@ -1,6 +1,9 @@
 import type { DiffEvent, ListKind, MemberRow, UserRecord } from './types';
 
-/** A follower a profile check showed still follows you is not checked again before this. */
+/**
+ * A follower a profile check showed still follows you is not checked again before this. After it,
+ * an assisted scan checks them again; a passive one keeps holding them.
+ */
 export const RECHECK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface DiffInput {
@@ -75,8 +78,11 @@ export function diffScan(input: DiffInput): DiffResult {
       const gone = goneHint?.has(m.userId);
       if (!gone && !confirmNow) {
         // Their profile said they still follow you: X hides them from the list, not a departure.
-        if (m.checkedAt && now - m.checkedAt < RECHECK_MS) {
-          kept.push({ ...m, missing: true });
+        // Missing again says nothing new, so they stay; a stale check is only redone, never skipped.
+        if (m.checkedAt) {
+          const row = { ...m, missing: true };
+          kept.push(row);
+          if (now - m.checkedAt >= RECHECK_MS && (verify || held?.has(m.userId))) toVerify.push(row);
           continue;
         }
         if (verify || held?.has(m.userId)) {

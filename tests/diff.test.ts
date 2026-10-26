@@ -135,6 +135,13 @@ describe('diffScan: followers X hides from the list', () => {
     const stale = { ...missed('1'), checkedAt: base.now - RECHECK_MS - 1 };
     expect(diffScan({ ...base, prev: [stale], next: [], verify: true }).toVerify.map((x) => x.userId)).toEqual(['1']);
   });
+  it('keeps holding a follower with a stale check when no profile check can run', () => {
+    const stale = { ...missed('1'), checkedAt: base.now - RECHECK_MS - 1 };
+    const r = diffScan({ ...base, prev: [stale], next: [], short: false });
+    expect(r.events).toEqual([]);
+    expect(r.toVerify).toEqual([]);
+    expect(r.members).toEqual([stale]);
+  });
   it('without a check, a departure from a short list is unconfirmed, from a full one unfollowed', () => {
     expect(diffScan({ ...base, prev: [missed('1')], next: [], short: true }).events[0].reason).toBe('unconfirmed');
     expect(diffScan({ ...base, prev: [missed('1')], next: [], short: false }).events[0].reason).toBe('unfollowed');
