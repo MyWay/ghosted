@@ -40,6 +40,8 @@ export type ToBackground =
   | { type: 'owner-handle'; handle: string }
   | { type: 'scan-finished'; kind: ListKind; outcome: 'complete' | 'invalid' | 'stopped' | 'timeout' | 'rate-limited' }
   | { type: 'stop-checks' }
+  /** The wait for X's limit is over but the check's tab is in the background: ask the user back. */
+  | { type: 'resume-ready' }
   // popup / dashboard -> background
   | { type: 'start-scan'; kinds: ListKind[] }
   | { type: 'resolve-review'; scanId: number; accept: boolean }
@@ -54,6 +56,11 @@ export interface CaptureReply {
   expected?: number;
   kind?: ListKind;
   rateLimited?: boolean;
+  /**
+   * X's limit for this list is used up; the list can continue at this time (ms). With
+   * `rateLimited` X already refused a page, without it the last allowed page just loaded.
+   */
+  resumeAt?: number;
   /** The scan committed as the first one for this list: a starting point, so no changes yet. */
   baseline?: boolean;
 }

@@ -44,7 +44,7 @@ Your first check records who follows you today. Changes appear from your second 
 
 GOOD TO KNOW
 • Checks run when you start them, with the browser open. Ghosted reminds you once a day.
-• Very large accounts take longer to check. If X slows things down, Ghosted stops and you can try again later.
+• Large accounts take longer to check. X only lets a list be read so far at a time, so with a few thousand followers the check may wait a while (it shows how long) and then finish by itself. Keep the X tab open meanwhile; you can use other tabs.
 • Ghosted only works on x.com and twitter.com.
 
 Ghosted is an independent tool and is not affiliated with, endorsed by, or sponsored by X Corp. "X" is a trademark of X Corp.

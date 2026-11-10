@@ -178,6 +178,17 @@ export class Repo {
     return scan ? { collected: scan.collected, pages: scan.state?.pages ?? 0 } : null;
   }
 
+  /**
+   * The collecting scan waits for X's rate limit: keep it from going stale until `until`. Returns
+   * false when there is no scan to keep (the limit hit before the first page).
+   */
+  async holdCurrentScan(ownerId: string, kind: ListKind, until: number): Promise<boolean> {
+    const scan = await this.currentScan(ownerId, kind);
+    if (!scan?.state) return false;
+    await this.db.scans.update(scan.scanId!, { state: { ...scan.state, heldUntil: until } });
+    return true;
+  }
+
   /** Abandoned / invalid scans keep metadata (avatars, counts) but never touch membership or handles. */
   private async finalizeScan(scan: ScanRow, status: 'abandoned' | 'invalid', reason: string, now: number) {
     const items = await this.db.scanItems.where('scanId').equals(scan.scanId!).toArray();

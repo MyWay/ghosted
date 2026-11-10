@@ -36,6 +36,8 @@ A setup page opens when the install finishes. Follow its three steps.
 2. Click the Ghosted icon and press **Check now**.
 3. Leave the X tab open and visible until it says **Check complete**.
 
+With a few thousand followers, the check may pause partway: see "Why did my check stop and say it is waiting?" below.
+
 The first check records who follows you today. From the next check on, Ghosted shows who
 joined; someone who left shows up once two checks in a row miss them. Check once a day; Ghosted reminds you.
 
@@ -69,14 +71,26 @@ Most likely they unfollowed and followed you again between checks; X's Notificat
 show "followed you" from them. Your next check lists them as a new follower again. New-follower
 alerts are off by default, so look in the Timeline, or turn them on in Settings.
 
+**Why did my check stop and say it is waiting?**
+X only lets a list be read so far in a short time, then refuses more for a while. A long list
+does not fit in one go. Ghosted stops scrolling, shows when it will continue, and then finishes the list from where it stopped. While it waits:
+
+- Keep the X tab open and do not reload it. A reload makes X start the list from the top, and the
+  check has to start over.
+- You can use other tabs. When X allows more, Ghosted sends a notification; click it (or go back to
+  the tab) and the check finishes.
+- Coming back late is fine, as long as the tab was left open.
+
+If X still refuses after the wait, the check stops and nothing is changed; run it again later.
+
 **Does it check automatically?**
 No. It only sees your lists when you run a check, so the browser must be open. You get a daily
 reminder.
 
 **Can X ban me for this?**
 The risk is low, but not zero. Ghosted never sends its own requests to X; it only reads the lists
-and profiles X loads while you (or its auto-scroll) browse them. If X slows you down, Ghosted stops and you can
-try again later. X's terms restrict automated tools, so use it at your own risk.
+and profiles X loads while you (or its auto-scroll) browse them. If X slows you down, Ghosted waits until X
+allows more, and stops if that does not help. X's terms restrict automated tools, so use it at your own risk.
 
 **Why isn't it in the Chrome Web Store?**
 Ghosted is distributed only through GitHub for now. Chrome shows a "developer mode" warning at

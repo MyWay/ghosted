@@ -61,6 +61,12 @@ export default defineContentScript({
       overlay = new Overlay(step, kind, skipped);
       scroller = new AutoScroller(kind, {
         onProgress: (p) => overlay?.update(kind, p),
+        onWait: (until) => overlay?.waiting(kind, until),
+        onReady: () => {
+          overlay?.ready();
+          void send({ type: 'resume-ready' });
+        },
+        onResume: () => overlay?.resumed(kind),
         onDone: async (outcome) => {
           scroller = null;
           // Ask first: the panel must say whether another list follows before it says anything final.

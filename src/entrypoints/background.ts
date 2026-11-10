@@ -19,6 +19,7 @@ import { findBoomerangs, withoutRepeats } from '../core/follows';
 import { planCheck, type CheckPlan, type LastCommits, type ListSizes } from '../core/plan';
 import type { EventRow } from '../db/schema';
 import { PACES, asPace, randomIn } from '../core/pace';
+import { HOLD_GRACE_MS, resumeAfterLimit, resumeAfterPage } from '../core/ratelimit';
 import {
   PROFILE_WAIT_MS,
   advanceToList,
@@ -58,6 +59,7 @@ const checks = new ProfileChecks({
 // Long enough for a slow check of a large account.
 const AUTOSCAN_TTL_MS = 3 * 60 * 60 * 1000;
 const NEXT_LIST_ALARM = 'autoscan-next-list';
+const RESUME_NOTIFICATION = 'resume-check';
 const DEFAULT_REMINDER_HOURS = 24;
 
 /** Serialize capture handling so page batches never interleave their DB transactions. */
@@ -127,19 +129,8 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
   const expected = await repo.expectedCount(ownerId, kind, now);
 
   if (msg.status === 429 || msg.status === 403) {
-    // Record what X actually said and how far the scan got, so limits can be told from breakage.
-    await setHealth({
-      lastRateLimitAt: now,
-      lastRateLimit: {
-        at: now,
-        kind,
-        status: msg.status,
-        headers: msg.rateLimit ?? null,
-        ...(await repo.collectingProgress(ownerId, kind)),
-      },
-    });
-    await repo.failCurrentScan(ownerId, kind, `HTTP ${msg.status} from X`, now);
-    return { handled: true, kind, status: 'error', reason: `HTTP ${msg.status}`, rateLimited: true, expected };
+    // Only a 429 is a limit that resets; a 403 is X refusing the request, which waiting does not fix.
+    return onListLimit({ ownerId, kind, msg, now, expected, reason: `HTTP ${msg.status}`, canWait: msg.status === 429 });
   }
 
   const apiError = parseApiErrors(msg.body);
@@ -147,17 +138,7 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
   if (!page && apiError) {
     // X answered with an error payload (often a 200 rate limit), not a format change.
     if (apiError.rateLimited) {
-      await setHealth({
-        lastRateLimitAt: now,
-        lastRateLimit: {
-          at: now,
-          kind,
-          status: msg.status,
-          message: apiError.message,
-          headers: msg.rateLimit ?? null,
-          ...(await repo.collectingProgress(ownerId, kind)),
-        },
-      });
+      return onListLimit({ ownerId, kind, msg, now, expected, reason: apiError.message, message: apiError.message, canWait: true });
     }
     await repo.failCurrentScan(ownerId, kind, `X error: ${apiError.message}`, now);
     return { handled: true, kind, status: 'error', reason: apiError.message, rateLimited: apiError.rateLimited, expected };
@@ -179,6 +160,9 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
     await refreshBadge(repo);
     notifyCommitted(ownerId, result.committed.events);
   }
+  // That page used the last request X allows for now: wait for the reset before asking for more.
+  const resumeAt = result.status === 'collecting' ? resumeAfterPage(msg.rateLimit, now) : undefined;
+  if (resumeAt !== undefined) await repo.holdCurrentScan(ownerId, kind, resumeAt + HOLD_GRACE_MS);
   return {
     handled: true,
     kind,
@@ -187,7 +171,46 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
     collected: result.collected,
     expected,
     ...(result.committed?.baseline ? { baseline: true } : {}),
+    ...(resumeAt !== undefined ? { resumeAt } : {}),
   };
+}
+
+/**
+ * X refused a list page. Record what it said and how far the scan got (so limits can be told from
+ * breakage), then keep the scan waiting for X's limit to reset. The page keeps its place in the
+ * list, so the same request works again afterwards. When waiting cannot help, the scan fails.
+ */
+async function onListLimit(a: {
+  ownerId: string;
+  kind: ListKind;
+  msg: Extract<ToBackground, { type: 'capture' }>;
+  now: number;
+  expected: number | undefined;
+  reason: string;
+  message?: string;
+  canWait: boolean;
+}): Promise<CaptureReply> {
+  const { ownerId, kind, msg, now } = a;
+  const resumeAt = a.canWait ? resumeAfterLimit(msg.rateLimit, now) : undefined;
+  await setHealth({
+    lastRateLimitAt: now,
+    lastRateLimit: {
+      at: now,
+      kind,
+      status: msg.status,
+      ...(a.message ? { message: a.message } : {}),
+      headers: msg.rateLimit ?? null,
+      resumeAt: resumeAt ?? null,
+      ...(await repo.collectingProgress(ownerId, kind)),
+    },
+  });
+  if (resumeAt === undefined) {
+    await repo.failCurrentScan(ownerId, kind, a.message ? `X error: ${a.message}` : `${a.reason} from X`, now);
+    return { handled: true, kind, status: 'error', reason: a.reason, rateLimited: true, expected: a.expected };
+  }
+  // No scan yet (the limit hit before the first page) is fine: the retried first page starts one.
+  await repo.holdCurrentScan(ownerId, kind, resumeAt + HOLD_GRACE_MS);
+  return { handled: true, kind, status: 'collecting', reason: a.reason, rateLimited: true, resumeAt, expected: a.expected };
 }
 
 /**
@@ -299,14 +322,30 @@ async function handleScanFinished(msg: Extract<ToBackground, { type: 'scan-finis
   }
   // Stopped: departures held for a profile check wait for the next check.
   await browser.storage.session.remove('autoscan');
-  if (msg.outcome === 'rate-limited')
+  if (msg.outcome === 'rate-limited') {
+    // The scan may still be waiting for a reset the check gave up on: close it.
+    const ownerId = await repo.getSetting<string | undefined>('ownerId', undefined);
+    if (ownerId) await repo.failCurrentScan(ownerId, msg.kind, 'X kept limiting requests', Date.now());
     await sendBrowser('Ghosted', RATE_LIMITED_TEXT);
+  }
   return { ok: true };
 }
 
 async function openNextList() {
   const scan = await getAutoScan();
   if (scan) await browser.tabs.update(scan.tabId, { url: urlFor(scan) }).catch(() => {});
+}
+
+/** Bring the check's tab to the front: it continues the list once it is visible. */
+async function focusCheckTab() {
+  const scan = await getAutoScan();
+  if (!scan) return;
+  try {
+    const tab = await browser.tabs.update(scan.tabId, { active: true });
+    if (tab?.windowId !== undefined) await browser.windows.update(tab.windowId, { focused: true });
+  } catch {
+    /* tab closed, or no window API (Firefox for Android) */
+  }
 }
 
 async function checkScanDue() {
@@ -344,6 +383,10 @@ export default defineBackground(() => {
         return respond(repo.setSetting('ownerHandle', msg.handle).then(() => ({ ok: true })));
       case 'scan-finished':
         return respond(enqueue(() => handleScanFinished(msg)));
+      case 'resume-ready':
+        return respond(
+          sendBrowser('Ghosted', "X's limit has reset. Open the X tab to finish your check.", RESUME_NOTIFICATION).then(() => ({ ok: true })),
+        );
       case 'stop-checks':
         return respond(enqueue(() => checks.stop()).then(() => ({ ok: true })));
       case 'start-scan':
@@ -383,6 +426,7 @@ export default defineBackground(() => {
 
   browser.notifications.onClicked.addListener((id) => {
     if (id === 'scan-due') void startScan(['following', 'followers']);
+    if (id === RESUME_NOTIFICATION) void focusCheckTab();
     browser.notifications.clear(id);
   });
 });

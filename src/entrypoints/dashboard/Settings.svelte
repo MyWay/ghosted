@@ -162,7 +162,7 @@
         <option value="slow">Slow: for very large accounts</option>
       </select>
     </label>
-    <p class="muted">If X stops a check with a rate limit, choose a slower speed. Slower checks send X fewer requests per minute; they make limits less likely but cannot rule them out.</p>
+    <p class="muted">X only lets a list be read so far at a time. When a check reaches that limit it waits for X to allow more, then finishes; keep its tab open meanwhile. Slower speeds send X fewer requests per minute, but a long list still reaches the limit.</p>
   </section>
 
   <section class="card grid">

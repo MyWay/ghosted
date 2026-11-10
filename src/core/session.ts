@@ -23,6 +23,8 @@ export interface SessionState {
   unavailableIds?: string[];
   gap: boolean;
   endReached: boolean;
+  /** The scan is waiting for X's rate limit to reset: it is not idle before this time. */
+  heldUntil?: number;
 }
 
 export interface PageInput {
@@ -131,7 +133,7 @@ export function evaluate(state: SessionState, expected: number | undefined, thre
 }
 
 export function isStale(state: SessionState, now: number): boolean {
-  return now - state.lastPageAt > SESSION_IDLE_MS;
+  return now - Math.max(state.lastPageAt, state.heldUntil ?? 0) > SESSION_IDLE_MS;
 }
 
 /**

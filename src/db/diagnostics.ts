@@ -49,6 +49,8 @@ export async function buildDiagnostics(repo: Repo, ownerId: string | undefined, 
             pages: health.lastRateLimit.pages ?? null,
             // X's own counters on the failing response: window size, what was left, when it resets.
             headers: rateHeaders(health.lastRateLimit.headers, now),
+            // Whether the check waited for the reset (minutes from now; negative: already over) or gave up.
+            resumeInMinutes: typeof health.lastRateLimit.resumeAt === 'number' ? Math.round((health.lastRateLimit.resumeAt - now) / 60_000) : null,
           }
         : null,
       // The same counters on the latest list page that loaded fine: how fast a check drains them.

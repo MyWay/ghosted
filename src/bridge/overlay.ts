@@ -102,6 +102,22 @@ function baseDoneText(outcome: Outcome, info: DoneInfo): { text: string; keepOpe
   }
 }
 
+/** Panel text while a list waits for X's limit to reset. */
+export function waitText(kind: ListKind, p?: Progress): string {
+  const total = p?.expected ? ` of ~${p.expected}` : '';
+  const sofar = p?.collected ? `${listName(kind)}: ${p.collected}${total} collected so far. ` : '';
+  return `${sofar}X only lets a list be read so far at a time, then makes you wait. Ghosted carries on from here when X allows it. Keep this tab open (do not reload it); you can use other tabs meanwhile.`;
+}
+
+/** The line under it: when the list continues. */
+export function resumeText(until: number, now = Date.now()): string {
+  const at = new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const left = until - now;
+  return left > 0 ? `Continues at ${at} (in ${countdown(left)})` : 'Continuing…';
+}
+
+export const READY_TEXT = 'Ready: come back to this tab to finish the check.';
+
 /** "45 s", "1 min 30 s". */
 export function countdown(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -122,6 +138,7 @@ export class Overlay {
   private stopBtn: HTMLButtonElement;
   private paused = false;
   private timer?: ReturnType<typeof setInterval>;
+  private last?: Progress;
 
   constructor(step?: { index: number; total: number }, current?: ListKind, skipped?: SkippedList[]) {
     this.host = document.createElement('div');
@@ -160,7 +177,31 @@ export class Overlay {
     document.documentElement.appendChild(this.host);
   }
 
+  /** X's limit is used up: say why nothing moves, and when it will. */
+  waiting(kind: ListKind, until: number) {
+    this.text.textContent = waitText(kind, this.last);
+    clearInterval(this.timer);
+    const tick = () => (this.wait.textContent = resumeText(until));
+    tick();
+    this.timer = setInterval(tick, 1000);
+  }
+
+  /** The wait is over, but the tab is in the background. */
+  ready() {
+    clearInterval(this.timer);
+    this.wait.textContent = READY_TEXT;
+  }
+
+  /** The wait is over and the list is moving again. */
+  resumed(kind: ListKind) {
+    clearInterval(this.timer);
+    this.wait.textContent = '';
+    if (this.last) this.update(kind, this.last);
+    else this.text.textContent = 'Continuing…';
+  }
+
   update(kind: ListKind, p: Progress) {
+    this.last = p;
     const total = p.expected ? ` of ~${p.expected}` : '';
     this.text.textContent = `${listName(kind)}: ${p.collected}${total} collected`;
     if (p.expected) this.bar.style.width = `${Math.min(100, Math.round((p.collected / p.expected) * 100))}%`;
@@ -191,6 +232,8 @@ export class Overlay {
 
   done(outcome: Outcome, info: DoneInfo) {
     const { text, keepOpen } = doneText(outcome, info);
+    clearInterval(this.timer);
+    this.wait.textContent = '';
     this.text.textContent = text;
     this.pauseBtn.remove();
     if (outcome === 'complete') this.bar.style.width = '100%';

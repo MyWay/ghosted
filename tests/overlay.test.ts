@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { age, countdown, doneText, skippedText, titleText } from '../src/bridge/overlay';
+import { age, countdown, doneText, resumeText, skippedText, titleText, waitText } from '../src/bridge/overlay';
 
 describe('doneText', () => {
   it('keeps the tab open while profile checks follow', () => {
@@ -64,5 +64,20 @@ describe('skipped lists', () => {
 describe('countdown', () => {
   it('formats seconds and minutes', () => {
     expect([0, 400, 5_000, 59_100, 60_000, 90_000, -5].map(countdown)).toEqual(['0 s', '1 s', '5 s', '1 min', '1 min', '1 min 30 s', '0 s']);
+  });
+});
+
+describe('waiting for X\'s limit', () => {
+  it('says how far the list got, that it continues by itself, and to keep the tab', () => {
+    const t = waitText('followers', { collected: 2450, expected: 2550 });
+    expect(t).toMatch(/^Followers: 2450 of ~2550 collected so far\./);
+    expect(t).toMatch(/carries on from here/);
+    expect(t).toMatch(/Keep this tab open \(do not reload it\); you can use other tabs/);
+    expect(waitText('followers')).toMatch(/^X only lets/);
+  });
+  it('counts down to the time the list continues', () => {
+    const now = Date.now();
+    expect(resumeText(now + 90_000, now)).toMatch(/^Continues at .+ \(in 1 min 30 s\)$/);
+    expect(resumeText(now - 1, now)).toBe('Continuing…');
   });
 });

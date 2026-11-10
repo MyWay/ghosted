@@ -160,6 +160,23 @@ describe('repo scans', () => {
     expect(await repo.db.users.count()).toBe(5);
   });
 
+  it('a scan waiting for X\'s limit is not idle, and continues from the same cursor', async () => {
+    await repo.ingestPage({ ownerId: OWNER, kind: 'followers', page: toPage(mkUsers(1, 5), 'c1'), now: clock });
+    const until = clock + 45 * 60_000;
+    expect(await repo.holdCurrentScan(OWNER, 'followers', until)).toBe(true);
+    expect(await repo.abandonStale(clock + 40 * 60_000)).toBe(0);
+    const r = await repo.ingestPage({ ownerId: OWNER, kind: 'followers', requestCursor: 'c1', page: toPage(mkUsers(6, 10)), now: clock + 41 * 60_000 });
+    expect(r.status).toBe('committed');
+    expect(await repo.listMembers(OWNER, 'followers')).toHaveLength(10);
+  });
+
+  it('a held scan is abandoned once its hold runs out, and there is nothing to hold before the first page', async () => {
+    expect(await repo.holdCurrentScan(OWNER, 'followers', clock + 60_000)).toBe(false);
+    await repo.ingestPage({ ownerId: OWNER, kind: 'followers', page: toPage(mkUsers(1, 5), 'c1'), now: clock });
+    await repo.holdCurrentScan(OWNER, 'followers', clock + 45 * 60_000);
+    expect(await repo.abandonStale(clock + 56 * 60_000)).toBe(1);
+  });
+
   it('flags a follower who also vanished from following as likely_gone', async () => {
     await scan('followers', mkUsers(1, 4));
     await scan('following', mkUsers(1, 4));
