@@ -172,6 +172,12 @@ export class Repo {
       .last();
   }
 
+  /** How far the collecting scan got, for rate-limit diagnostics. */
+  async collectingProgress(ownerId: string, kind: ListKind): Promise<{ collected: number; pages: number } | null> {
+    const scan = await this.currentScan(ownerId, kind);
+    return scan ? { collected: scan.collected, pages: scan.state?.pages ?? 0 } : null;
+  }
+
   /** Abandoned / invalid scans keep metadata (avatars, counts) but never touch membership or handles. */
   private async finalizeScan(scan: ScanRow, status: 'abandoned' | 'invalid', reason: string, now: number) {
     const items = await this.db.scanItems.where('scanId').equals(scan.scanId!).toArray();

@@ -7,6 +7,16 @@ export interface DiagnosticsMeta {
 
 const minutesAgo = (ts: number | undefined, now: number) => (ts ? Math.round((now - ts) / 60_000) : null);
 
+/** Rate-limit counters with the reset shown as minutes from now (negative: already reset). */
+const rateHeaders = (h: { limit?: number; remaining?: number; reset?: number } | null | undefined, now: number) =>
+  h
+    ? {
+        limit: h.limit ?? null,
+        remaining: h.remaining ?? null,
+        resetInMinutes: typeof h.reset === 'number' ? Math.round((h.reset * 1000 - now) / 60_000) : null,
+      }
+    : null;
+
 /**
  * A short technical snapshot for bug reports. Deliberately contains no handles, names or ids:
  * only counts, statuses and ages.
@@ -28,6 +38,27 @@ export async function buildDiagnostics(repo: Repo, ownerId: string | undefined, 
     health: {
       lastCaptureMinutesAgo: minutesAgo(health.lastCaptureAt, now),
       lastRateLimitMinutesAgo: minutesAgo(health.lastRateLimitAt, now),
+      // What X answered and how far the scan got: tells a real limit from a broken response.
+      lastRateLimit: health.lastRateLimit
+        ? {
+            minutesAgo: minutesAgo(health.lastRateLimit.at, now),
+            kind: health.lastRateLimit.kind ?? null,
+            status: health.lastRateLimit.status ?? null,
+            message: health.lastRateLimit.message ?? null,
+            collected: health.lastRateLimit.collected ?? null,
+            pages: health.lastRateLimit.pages ?? null,
+            // X's own counters on the failing response: window size, what was left, when it resets.
+            headers: rateHeaders(health.lastRateLimit.headers, now),
+          }
+        : null,
+      // The same counters on the latest list page that loaded fine: how fast a check drains them.
+      lastListHeaders: health.lastListHeaders
+        ? {
+            kind: health.lastListHeaders.kind ?? null,
+            minutesAgo: minutesAgo(health.lastListHeaders.at, now),
+            ...rateHeaders(health.lastListHeaders, now),
+          }
+        : null,
       // Where X keeps numeric fields in the profile response, shown only when counts were not found.
       profileShape: health.profileShape ?? null,
       lastParseError: health.lastParseError

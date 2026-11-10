@@ -1,4 +1,5 @@
 import type { ListKind } from '../core/types';
+import type { SkippedList } from '../core/plan';
 import type { Outcome, Progress } from './autoscroll';
 
 const listName = (kind: ListKind) => (kind === 'followers' ? 'Followers' : 'Following');
@@ -11,7 +12,47 @@ export interface DoneInfo {
   baseline?: boolean;
   /** Profiles the check visits next, of followers who seem to have left. */
   checks?: number;
+  /** Requested lists this check leaves out, and why. */
+  skipped?: SkippedList[];
 }
+
+/** "under an hour", "20 h", "3 days". */
+export function age(ms: number): string {
+  const h = ms / 3_600_000;
+  if (h < 1) return 'under an hour';
+  if (h < 48) return `${Math.round(h)} h`;
+  return `${Math.round(h / 24)} days`;
+}
+
+/**
+ * Why a requested list is not part of this check, so a one-list check does not read as both.
+ * Empty when nothing was left out.
+ */
+export function skippedText(skipped: SkippedList[] | undefined, now = Date.now()): string {
+  return (skipped ?? [])
+    .map((s) => {
+      const list = listName(s.kind);
+      if (s.reason === 'fresh' && s.checkedAt !== undefined)
+        return `${list} was skipped: it was checked ${age(now - s.checkedAt)} ago.`;
+      return `${list} is left for your next check, so this one stays under X's limit.`;
+    })
+    .join(' ');
+}
+
+/** Panel title: the list position, or which list runs and which waits for next time. */
+export function titleText(step?: { index: number; total: number }, current?: ListKind, skipped?: SkippedList[]): string {
+  if (step && step.total > 1) return `Ghosted · checking list ${step.index} of ${step.total}`;
+  if (current && skipped?.length) {
+    const later = skipped.map((s) => s.kind).join(' and ');
+    return `Ghosted · checking ${current} (${later} next time)`;
+  }
+  return 'Ghosted · checking';
+}
+
+const withSkipped = (text: string, skipped?: SkippedList[]) => {
+  const note = skippedText(skipped);
+  return note ? `${text} ${note}` : text;
+};
 
 const people = (n: number) => (n === 1 ? '1 follower' : `${n} followers`);
 
@@ -20,6 +61,12 @@ const people = (n: number) => (n === 1 ? '1 follower' : `${n} followers`);
  * close the tab on "complete" and the second list never runs.
  */
 export function doneText(outcome: Outcome, info: DoneInfo): { text: string; keepOpen: boolean } {
+  const r = baseDoneText(outcome, info);
+  // Only on the final word of the check: mid-check panels talk about what comes next.
+  return r.keepOpen ? r : { ...r, text: withSkipped(r.text, info.skipped) };
+}
+
+function baseDoneText(outcome: Outcome, info: DoneInfo): { text: string; keepOpen: boolean } {
   const list = listName(info.kind);
   if (info.next && (outcome === 'complete' || outcome === 'invalid')) {
     const first =
@@ -49,7 +96,7 @@ export function doneText(outcome: Outcome, info: DoneInfo): { text: string; keep
       return { text: 'No progress for 3 minutes; check abandoned.', keepOpen: false };
     case 'rate-limited':
       return {
-        text: 'X is limiting requests, so this check stopped. Try again in about 15 minutes, or pick a slower check speed in Settings.',
+        text: 'X is limiting requests, so this check stopped. Your next check picks up the list that did not finish.',
         keepOpen: false,
       };
   }
@@ -76,7 +123,7 @@ export class Overlay {
   private paused = false;
   private timer?: ReturnType<typeof setInterval>;
 
-  constructor(step?: { index: number; total: number }) {
+  constructor(step?: { index: number; total: number }, current?: ListKind, skipped?: SkippedList[]) {
     this.host = document.createElement('div');
     this.host.style.cssText = 'all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647';
     const root = this.host.attachShadow({ mode: 'closed' });
@@ -103,7 +150,7 @@ export class Overlay {
     this.bar = root.querySelector('.fill')!;
     this.pauseBtn = root.querySelector('.pause')!;
     this.stopBtn = root.querySelector('.stop')!;
-    this.title.textContent = step && step.total > 1 ? `Ghosted · checking list ${step.index} of ${step.total}` : 'Ghosted · checking';
+    this.title.textContent = titleText(step, current, skipped);
     this.pauseBtn.onclick = () => {
       this.paused = !this.paused;
       this.pauseBtn.textContent = this.paused ? 'Resume' : 'Pause';
@@ -128,10 +175,13 @@ export class Overlay {
   }
 
   /** The profile checks are over: the whole check is. */
-  checksDone(rateLimited = false) {
-    this.text.textContent = rateLimited
-      ? 'X is limiting requests, so the profile checks stopped. The rest are checked next time. You can close this tab.'
-      : 'Check complete. You can close this tab.';
+  checksDone(rateLimited = false, skipped?: SkippedList[]) {
+    this.text.textContent = withSkipped(
+      rateLimited
+        ? 'X is limiting requests, so the profile checks stopped. The rest are checked next time. You can close this tab.'
+        : 'Check complete. You can close this tab.',
+      skipped,
+    );
     if (!rateLimited) this.bar.style.width = '100%';
     this.pauseBtn.remove();
     this.stopBtn.textContent = 'Close';

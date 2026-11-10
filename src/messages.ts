@@ -1,6 +1,7 @@
 import type { ListKind } from './core/types';
 import type { Pace } from './core/pace';
 import type { ScanStatus } from './db/schema';
+import type { SkippedList } from './core/plan';
 
 export const CHANNEL = 'ghosted';
 
@@ -12,11 +13,29 @@ export interface PageCapture {
   body: unknown;
   /** Request body, only for captured unfollow requests (form-encoded `user_id=...`). */
   requestBody?: string;
+  /** X's `x-rate-limit-*` response headers, when present. Never auth headers. */
+  rateLimit?: RateLimitHeaders;
+}
+
+/** X's `x-rate-limit-limit / -remaining / -reset` (reset is a unix time in seconds). */
+export interface RateLimitHeaders {
+  limit?: number;
+  remaining?: number;
+  reset?: number;
+}
+
+/** Keeps only finite numbers from a page-supplied rate-limit object (the page world is untrusted). */
+export function rateLimitFrom(v: unknown): RateLimitHeaders | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const o = v as Record<string, unknown>;
+  const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : undefined);
+  const out: RateLimitHeaders = { limit: num(o.limit), remaining: num(o.remaining), reset: num(o.reset) };
+  return out.limit === undefined && out.remaining === undefined && out.reset === undefined ? undefined : out;
 }
 
 /** Bridge -> background. */
 export type ToBackground =
-  | { type: 'capture'; url: string; status: number; body: unknown; requestBody?: string }
+  | { type: 'capture'; url: string; status: number; body: unknown; requestBody?: string; rateLimit?: RateLimitHeaders }
   | { type: 'bridge-ready'; path: string }
   | { type: 'owner-handle'; handle: string }
   | { type: 'scan-finished'; kind: ListKind; outcome: 'complete' | 'invalid' | 'stopped' | 'timeout' | 'rate-limited' }
@@ -45,6 +64,8 @@ export interface BridgeReadyReply {
   pace?: Pace;
   /** Position of this list in the check, for "1 of 2". */
   step?: { index: number; total: number };
+  /** Requested lists this check leaves out, and why. */
+  skipped?: SkippedList[];
   /** This page is the profile of a follower who seems to have left, visited to check. */
   checking?: { handle: string; index: number; total: number };
 }
@@ -54,6 +75,8 @@ export interface ChecksDone {
   type: 'checks-done';
   /** X limited requests, so the checks stopped early. */
   rateLimited?: boolean;
+  /** Requested lists this check left out, and why. */
+  skipped?: SkippedList[];
 }
 
 export interface ScanFinishedReply {

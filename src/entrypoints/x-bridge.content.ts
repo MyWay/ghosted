@@ -9,6 +9,7 @@ import {
   type PageCapture,
   type ScanFinishedReply,
   type ToBackground,
+  rateLimitFrom,
 } from '../messages';
 import { AutoScroller } from '../bridge/autoscroll';
 import { PACES, asPace, type Pace } from '../core/pace';
@@ -41,6 +42,7 @@ export default defineContentScript({
         status: data.status ?? 0,
         body: data.body,
         requestBody: typeof data.requestBody === 'string' ? data.requestBody : undefined,
+        rateLimit: rateLimitFrom(data.rateLimit),
       });
       if (!reply?.handled) return;
       lastReply = reply;
@@ -55,8 +57,8 @@ export default defineContentScript({
       else if (attempt < 30) setTimeout(() => reportHandle(attempt + 1), 1000);
     };
 
-    const start = async (kind: ListKind, pace: Pace, step?: BridgeReadyReply['step']) => {
-      overlay = new Overlay(step);
+    const start = async (kind: ListKind, pace: Pace, step?: BridgeReadyReply['step'], skipped?: BridgeReadyReply['skipped']) => {
+      overlay = new Overlay(step, kind, skipped);
       scroller = new AutoScroller(kind, {
         onProgress: (p) => overlay?.update(kind, p),
         onDone: async (outcome) => {
@@ -64,7 +66,7 @@ export default defineContentScript({
           // Ask first: the panel must say whether another list follows before it says anything final.
           const reply = await send<ScanFinishedReply>({ type: 'scan-finished', kind, outcome });
           const baseline = lastReply?.kind === kind && lastReply.baseline === true;
-          overlay?.done(outcome, { kind, next: reply?.next, baseline, checks: reply?.checks });
+          overlay?.done(outcome, { kind, next: reply?.next, baseline, checks: reply?.checks, skipped });
         },
       }, PACES[pace]);
       overlay.onPause = (paused) => scroller?.setPaused(paused);
@@ -74,13 +76,13 @@ export default defineContentScript({
 
     browser.runtime.onMessage.addListener((msg: unknown) => {
       const done = msg as ChecksDone | null;
-      if (done?.type === 'checks-done') overlay?.checksDone(done.rateLimited);
+      if (done?.type === 'checks-done') overlay?.checksDone(done.rateLimited, done.skipped);
     });
 
     const init = async () => {
       reportHandle();
       const reply = await send<BridgeReadyReply>({ type: 'bridge-ready', path: location.pathname });
-      if (reply?.autoscroll) void start(reply.autoscroll, asPace(reply.pace), reply.step);
+      if (reply?.autoscroll) void start(reply.autoscroll, asPace(reply.pace), reply.step, reply.skipped);
       else if (reply?.checking) {
         overlay = new Overlay();
         overlay.checking(reply.checking);

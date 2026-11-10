@@ -1,6 +1,7 @@
 import { parseApiErrors } from './parse/timeline';
 import { parseUserResult, profileResult } from './parse/user';
 import type { ListKind } from './types';
+import type { SkippedList } from './plan';
 
 /** A follower missing from two scans, whose profile the check visits before reporting them. */
 export interface ToCheck {
@@ -22,6 +23,8 @@ export interface AutoScan {
   phase: 'profile' | 'list' | 'verify';
   /** Lists in the whole check (`kinds` shrinks as lists finish). Missing in state saved by older versions. */
   total?: number;
+  /** Lists the user asked for that this check leaves out, and why (shown on the panel). */
+  skipped?: SkippedList[];
   /** Profiles still to visit in the verify phase, current first. */
   queue?: ToCheck[];
   /** Profiles in the whole verify phase, for "1 of 3". */
@@ -37,13 +40,14 @@ export const CHECK_WAIT_MS = 12_000;
 /** Most profiles one check visits; departures past this are reported unchecked. */
 export const MAX_CHECKS = 15;
 
-export const newAutoScan = (tabId: number, kinds: ListKind[], handle: string, now: number): AutoScan => ({
+export const newAutoScan = (tabId: number, kinds: ListKind[], handle: string, now: number, skipped: SkippedList[] = []): AutoScan => ({
   tabId,
   kinds,
   handle,
   startedAt: now,
   phase: 'profile',
   total: kinds.length,
+  ...(skipped.length ? { skipped } : {}),
 });
 
 /** Which list of the check is current, 1-based: "1 of 2". */

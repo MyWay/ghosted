@@ -1,4 +1,4 @@
-import { CHANNEL, type PageCapture } from '../messages';
+import { CHANNEL, type PageCapture, type RateLimitHeaders } from '../messages';
 
 const MATCH =
   /\/i\/api\/graphql\/[^/]+\/(Following|Followers|UserByScreenName)(?:[/?]|$)|\/i\/api\/1\.1\/friendships\/destroy\.json/;
@@ -6,19 +6,33 @@ const MATCH =
 /**
  * Runs in the page's own JS world. It only OBSERVES responses X's web app already fetches (the
  * followers / following lists, your profile, and your own unfollow clicks); it never issues
- * requests and never reads or stores auth headers.
+ * requests and never reads or stores auth headers (only X's public `x-rate-limit-*` counters).
  */
 export default defineContentScript({
   matches: ['https://x.com/*', 'https://twitter.com/*'],
   world: 'MAIN',
   runAt: 'document_start',
   main() {
-    const post = (url: string, status: number, body: unknown, requestBody?: string) => {
+    const post = (url: string, status: number, body: unknown, requestBody?: string, rateLimit?: RateLimitHeaders) => {
       try {
-        const msg: PageCapture = { channel: CHANNEL, url, status, body, requestBody };
+        const msg: PageCapture = { channel: CHANNEL, url, status, body, requestBody, rateLimit };
         window.postMessage(msg, window.location.origin);
       } catch {
         /* never break the page */
+      }
+    };
+    /** Reads only X's rate-limit counters, given any header getter (fetch Headers or XHR). */
+    const rateLimitOf = (get: (name: string) => string | null): RateLimitHeaders | undefined => {
+      try {
+        const num = (name: string) => {
+          const v = get(`x-rate-limit-${name}`);
+          const n = v === null ? NaN : Number(v);
+          return Number.isFinite(n) ? n : undefined;
+        };
+        const out: RateLimitHeaders = { limit: num('limit'), remaining: num('remaining'), reset: num('reset') };
+        return out.limit === undefined && out.remaining === undefined && out.reset === undefined ? undefined : out;
+      } catch {
+        return undefined;
       }
     };
     const bodyText = (b: unknown): string | undefined =>
@@ -34,15 +48,16 @@ export default defineContentScript({
         if (url && MATCH.test(url)) {
           const requestBody = bodyText(args[1]?.body);
           promise
-            .then((res) =>
-              res
+            .then((res) => {
+              const rateLimit = rateLimitOf((n) => res.headers.get(n));
+              return res
                 .clone()
                 .json()
                 .then(
-                  (body) => post(url, res.status, body, requestBody),
-                  () => post(url, res.status, null, requestBody),
-                ),
-            )
+                  (body) => post(url, res.status, body, requestBody, rateLimit),
+                  () => post(url, res.status, null, requestBody, rateLimit),
+                );
+            })
             .catch(() => {});
         }
       } catch {
@@ -70,7 +85,7 @@ export default defineContentScript({
             } catch {
               /* unparseable: reported as null */
             }
-            post(info.url, this.status, raw, info.body);
+            post(info.url, this.status, raw, info.body, rateLimitOf((n) => this.getResponseHeader(n)));
           });
         } else {
           matched.delete(this);

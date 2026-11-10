@@ -100,7 +100,11 @@ export class ProfileChecks {
     const ownerId = await this.ownerId();
     const recorded = (await this.d.repo.db.events.bulkGet(scan.eventIds ?? [])).filter((e): e is EventRow => !!e);
     if (ownerId && recorded.length) this.d.notify(ownerId, recorded);
-    await this.d.tell(scan.tabId, { type: 'checks-done', ...(opts.rateLimited ? { rateLimited: true } : {}) });
+    await this.d.tell(scan.tabId, {
+      type: 'checks-done',
+      ...(opts.rateLimited ? { rateLimited: true } : {}),
+      ...(scan.skipped?.length ? { skipped: scan.skipped } : {}),
+    });
   }
 
   /** Held departures no check reached in time are reported without one. */

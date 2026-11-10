@@ -16,6 +16,7 @@ import type {
 import { notifyEvents, sendBrowser, testChannel } from '../notify';
 import { refreshBadge } from '../notify/badge';
 import { findBoomerangs, withoutRepeats } from '../core/follows';
+import { planCheck, type CheckPlan, type LastCommits, type ListSizes } from '../core/plan';
 import type { EventRow } from '../db/schema';
 import { PACES, asPace, randomIn } from '../core/pace';
 import {
@@ -32,7 +33,7 @@ import {
 const repo = new Repo();
 
 const RATE_LIMITED_TEXT =
-  'X is limiting requests, so the check stopped. Try again in about 15 minutes, or choose a slower check speed in Settings.';
+  'X is limiting requests, so the check stopped. Your next check picks up the list that did not finish.';
 
 const checks = new ProfileChecks({
   repo,
@@ -48,7 +49,8 @@ const checks = new ProfileChecks({
   },
   tell: (tabId, msg) => browser.tabs.sendMessage(tabId, msg).then(() => {}, () => {}),
   rateLimited: async () => {
-    await setHealth({ lastRateLimitAt: Date.now() });
+    const now = Date.now();
+    await setHealth({ lastRateLimitAt: now, lastRateLimit: { at: now, kind: 'profile-checks' } });
     await sendBrowser('Ghosted', RATE_LIMITED_TEXT);
   },
 });
@@ -125,8 +127,18 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
   const expected = await repo.expectedCount(ownerId, kind, now);
 
   if (msg.status === 429 || msg.status === 403) {
+    // Record what X actually said and how far the scan got, so limits can be told from breakage.
+    await setHealth({
+      lastRateLimitAt: now,
+      lastRateLimit: {
+        at: now,
+        kind,
+        status: msg.status,
+        headers: msg.rateLimit ?? null,
+        ...(await repo.collectingProgress(ownerId, kind)),
+      },
+    });
     await repo.failCurrentScan(ownerId, kind, `HTTP ${msg.status} from X`, now);
-    await setHealth({ lastRateLimitAt: now });
     return { handled: true, kind, status: 'error', reason: `HTTP ${msg.status}`, rateLimited: true, expected };
   }
 
@@ -134,8 +146,20 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
   const page = msg.status >= 200 && msg.status < 300 && msg.body ? parseTimelinePage(msg.body) : null;
   if (!page && apiError) {
     // X answered with an error payload (often a 200 rate limit), not a format change.
+    if (apiError.rateLimited) {
+      await setHealth({
+        lastRateLimitAt: now,
+        lastRateLimit: {
+          at: now,
+          kind,
+          status: msg.status,
+          message: apiError.message,
+          headers: msg.rateLimit ?? null,
+          ...(await repo.collectingProgress(ownerId, kind)),
+        },
+      });
+    }
     await repo.failCurrentScan(ownerId, kind, `X error: ${apiError.message}`, now);
-    if (apiError.rateLimited) await setHealth({ lastRateLimitAt: now });
     return { handled: true, kind, status: 'error', reason: apiError.message, rateLimited: apiError.rateLimited, expected };
   }
   if (!page) {
@@ -149,7 +173,8 @@ async function handleCapture(msg: Extract<ToBackground, { type: 'capture' }>, ta
   const auto = await getAutoScan();
   const verify = !!auto && auto.tabId === tabId;
   const result = await repo.ingestPage({ ownerId, kind, requestCursor: info.cursor, page, now, verify });
-  await setHealth({ lastCaptureAt: now, lastParseError: null });
+  // X's own rate-limit headers on the latest list page: the window size and how much of it is left.
+  await setHealth({ lastCaptureAt: now, lastParseError: null, lastListHeaders: msg.rateLimit ? { kind, at: now, ...msg.rateLimit } : null });
   if (result.committed?.events.length) {
     await refreshBadge(repo);
     notifyCommitted(ownerId, result.committed.events);
@@ -179,13 +204,35 @@ function notifyCommitted(ownerId: string, events: EventRow[]): void {
   })().catch(() => {});
 }
 
+/**
+ * Which lists a requested check actually reads. A full check skips lists with a fresh committed
+ * scan: X limits how much one session may read, and re-reading a fresh list spends the budget the
+ * stale list needs to ever finish (a check that dies near the end used to restart both lists).
+ */
+async function planScan(kinds: ListKind[], now = Date.now()): Promise<CheckPlan> {
+  if (kinds.length < 2) return { kinds, skipped: [] };
+  const ownerId = await repo.getSetting<string | undefined>('ownerId', undefined);
+  if (!ownerId) return planCheck(kinds, {}, now);
+  const lastCommitAt: LastCommits = {};
+  for (const kind of ['followers', 'following'] as ListKind[]) {
+    const last = await repo.lastCommit(ownerId, kind);
+    if (last?.endedAt) lastCommitAt[kind] = last.endedAt;
+  }
+  // Profile counts of any age: list sizes change slowly, and only their rough size matters here.
+  const profile = await repo.getSetting<{ followersCount?: number; followingCount?: number } | null>(`profile:${ownerId}`, null);
+  const sizes: ListSizes = { followers: profile?.followersCount, following: profile?.followingCount };
+  return planCheck(kinds, lastCommitAt, now, sizes);
+}
+
 async function startScan(kinds: ListKind[]): Promise<CommandReply> {
   const handle = await repo.getSetting<string | undefined>('ownerHandle', undefined);
   if (!handle) return { ok: false, error: 'Open x.com once while logged in so the extension can learn your handle.' };
+  const plan = await planScan(kinds);
+  if (!plan.kinds.length) return { ok: false, error: 'Nothing to check right now.' };
   const [active] = await browser.tabs.query({ active: true, currentWindow: true });
   const onX = active?.id !== undefined && /^https:\/\/(x|twitter)\.com\//.test(active.url ?? '');
   // Placeholder tab id: the real one is known only after the tab is opened.
-  const draft = newAutoScan(-1, kinds, handle, Date.now());
+  const draft = newAutoScan(-1, plan.kinds, handle, Date.now(), plan.skipped);
   const url = urlFor(draft);
   const tab = onX ? await browser.tabs.update(active.id!, { url }) : await browser.tabs.create({ url, active: true });
   if (tab?.id === undefined) return { ok: false, error: 'Could not open a tab.' };
@@ -226,6 +273,7 @@ async function handleBridgeReady(msg: { path: string }, tabId: number | undefine
     autoscroll: answer.autoscroll,
     pace: asPace(await repo.getSetting('pace', undefined)),
     ...(answer.autoscroll && scan ? { step: stepOf(scan) } : {}),
+    ...(answer.autoscroll && scan?.skipped?.length ? { skipped: scan.skipped } : {}),
     ...(answer.checking ? { checking: answer.checking } : {}),
   };
 }

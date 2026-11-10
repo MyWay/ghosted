@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countdown, doneText } from '../src/bridge/overlay';
+import { age, countdown, doneText, skippedText, titleText } from '../src/bridge/overlay';
 
 describe('doneText', () => {
   it('keeps the tab open while profile checks follow', () => {
@@ -28,6 +28,36 @@ describe('doneText', () => {
   it('a stopped or rate-limited check ends, even if lists were left', () => {
     expect(doneText('stopped', { kind: 'following', next }).keepOpen).toBe(false);
     expect(doneText('rate-limited', { kind: 'following', next }).keepOpen).toBe(false);
+  });
+});
+
+describe('skipped lists', () => {
+  const now = Date.now();
+  const fresh = { kind: 'following' as const, reason: 'fresh' as const, checkedAt: now - 20 * 3_600_000 };
+  const budget = { kind: 'following' as const, reason: 'budget' as const };
+
+  it('says why a requested list is not in this check', () => {
+    expect(skippedText([fresh], now)).toBe('Following was skipped: it was checked 20 h ago.');
+    expect(skippedText([budget], now)).toBe("Following is left for your next check, so this one stays under X's limit.");
+    expect(skippedText(undefined, now)).toBe('');
+  });
+
+  it('the title names the list that runs and the one that waits', () => {
+    expect(titleText(undefined, 'followers', [budget])).toBe('Ghosted · checking followers (following next time)');
+    expect(titleText({ index: 1, total: 2 }, 'followers')).toBe('Ghosted · checking list 1 of 2');
+    expect(titleText({ index: 1, total: 1 }, 'followers')).toBe('Ghosted · checking');
+  });
+
+  it('the final message adds the note; mid-check messages do not', () => {
+    expect(doneText('complete', { kind: 'followers', skipped: [budget] }).text).toBe(
+      "Check complete. You can close this tab. Following is left for your next check, so this one stays under X's limit.",
+    );
+    expect(doneText('rate-limited', { kind: 'followers', skipped: [budget] }).text).toMatch(/Following is left for your next check/);
+    expect(doneText('complete', { kind: 'followers', checks: 2, skipped: [budget] }).text).not.toMatch(/next check/);
+  });
+
+  it('formats ages', () => {
+    expect([10 * 60_000, 20 * 3_600_000, 72 * 3_600_000].map(age)).toEqual(['under an hour', '20 h', '3 days']);
   });
 });
 
